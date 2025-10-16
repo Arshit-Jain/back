@@ -117,7 +117,7 @@ app.get("/auth/google/callback", passport.authenticate("google", {
     req.session.userId = req.user.id;
     req.session.username = req.user.username;
     // Instruct browser to redirect to client app after login
-    res.redirect("http://localhost:5173"); // Or your frontend base URL
+    res.redirect(process.env.FRONTEND_URL || "http://localhost:5173");
 });
 
 // Authentication middleware
