@@ -18,15 +18,7 @@ const pool = new Pool({
   },
 });
 
-// Optional: test the connection once
-(async () => {
-  try {
-    const client = await pool.connect();
-    console.log('✅ Connected to Supabase PostgreSQL');
-    client.release();
-  } catch (err) {
-    console.error('❌ Supabase connection error:', err);
-  }
-})();
+const client = await pool.connect();
+
 
 export default pool;
