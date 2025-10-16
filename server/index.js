@@ -202,6 +202,7 @@ app.get("/test-db", async (req, res) => {
   let client;
   
   try {
+    const pool = (await import('./database/connection.js')).default;
     
     // Get a client from the pool
     client = await pool.connect();
