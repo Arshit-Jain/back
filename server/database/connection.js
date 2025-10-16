@@ -1,18 +1,20 @@
 import pkg from 'pg'
 const { Pool } = pkg
 import dotenv from 'dotenv'
+import { setDefaultResultOrder } from 'dns'
 
 dotenv.config()
+// Respect DNS order (allows IPv6-first if provided by Supabase)
+try { setDefaultResultOrder('verbatim') } catch (_) {}
 
-// For Supabase, you can use either individual connection parameters or a connection string
+// Use only connection string for Supabase
+const connectionString = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL
+if (!connectionString) {
+  throw new Error('DATABASE_URL (or SUPABASE_DB_URL) is required')
+}
+
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || process.env.SUPABASE_DB_URL,
-  // Fallback to individual parameters if connection string is not provided
-  user: process.env.DB_USER || process.env.SUPABASE_DB_USER,
-  host: process.env.DB_HOST || process.env.SUPABASE_DB_HOST,
-  database: process.env.DB_NAME || process.env.SUPABASE_DB_NAME,
-  password: process.env.DB_PASSWORD || process.env.SUPABASE_DB_PASSWORD,
-  port: process.env.DB_PORT || process.env.SUPABASE_DB_PORT || 5432,
+  connectionString,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 })
 
