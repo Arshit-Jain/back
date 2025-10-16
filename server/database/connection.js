@@ -1,30 +1,32 @@
-import pkg from 'pg'
-const { Pool } = pkg
-import dotenv from 'dotenv'
-import { setDefaultResultOrder } from 'dns'
+import pkg from 'pg';
+const { Pool } = pkg;
+import dotenv from 'dotenv';
 
-dotenv.config()
-// Respect DNS order (allows IPv6-first if provided by Supabase)
-try { setDefaultResultOrder('verbatim') } catch (_) {}
+dotenv.config();
 
-// Use only connection string for Supabase
-const connectionString = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL
+// Use Supabase connection string
+const connectionString = process.env.SUPABASE_DB_URL || process.env.DATABASE_URL;
+
 if (!connectionString) {
-  throw new Error('DATABASE_URL (or SUPABASE_DB_URL) is required')
+  throw new Error('❌ Missing Supabase database URL (SUPABASE_DB_URL or DATABASE_URL)');
 }
 
 const pool = new Pool({
   connectionString,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
-})
+  ssl: {
+    rejectUnauthorized: false, // required for Supabase
+  },
+});
 
-// Test connection
-pool.on('connect', () => {
-  console.log('Connected to database')
-})
+// Optional: test the connection once
+(async () => {
+  try {
+    const client = await pool.connect();
+    console.log('✅ Connected to Supabase PostgreSQL');
+    client.release();
+  } catch (err) {
+    console.error('❌ Supabase connection error:', err);
+  }
+})();
 
-pool.on('error', (err) => {
-  console.error('Database connection error:', err)
-})
-
-export default pool
+export default pool;
