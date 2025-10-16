@@ -108,18 +108,47 @@ passport.use(new GoogleStrategy.Strategy({
 }));
 
 // Auth endpoint for Google
-app.get("/auth/google", passport.authenticate("google", { scope: ["profile", "email"] }));
-// Google callback
-app.get("/auth/google/callback", passport.authenticate("google", {
-    failureRedirect: "/login",
-    session: true,
-}), (req, res) => {
-    // For API: Set session and respond with success (if you want frontend to handle it differently, adjust here)
-    req.session.userId = req.user.id;
-    req.session.username = req.user.username;
-    // Instruct browser to redirect to client app after login
-    res.redirect(process.env.FRONTEND_URL || "http://localhost:5173");
+app.get("/auth/google", (req, res, next) => {
+    console.log('Initiating Google OAuth');
+    passport.authenticate("google", { 
+        scope: ["profile", "email"] 
+    })(req, res, next);
 });
+
+// Google callback - UPDATED with better error handling
+app.get("/auth/google/callback", 
+    (req, res, next) => {
+        console.log('Google callback received');
+        passport.authenticate("google", {
+            failureRedirect: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/login?error=oauth_failed`,
+            session: true,
+        })(req, res, next);
+    },
+    (req, res) => {
+        try {
+            console.log('OAuth successful, user:', req.user?.id);
+            
+            // Set session data
+            req.session.userId = req.user.id;
+            req.session.username = req.user.username;
+            
+            // Save session before redirect
+            req.session.save((err) => {
+                if (err) {
+                    console.error('Session save error:', err);
+                    return res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/login?error=session_failed`);
+                }
+                
+                console.log('Session saved, redirecting to frontend');
+                const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+                res.redirect(frontendUrl);
+            });
+        } catch (error) {
+            console.error('Error in OAuth callback:', error);
+            res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}/login?error=callback_failed`);
+        }
+    }
+);
 
 // Authentication middleware
 const requireAuth = (req, res, next) => {
