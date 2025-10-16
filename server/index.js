@@ -29,10 +29,13 @@ app.use(session({
     resave: false,
     saveUninitialized: false,
     cookie: {
-        secure: false, // Set to true in production with HTTPS
+        secure: process.env.NODE_ENV === 'production', // true for HTTPS
         httpOnly: true,
-        maxAge: 24 * 60 * 60 * 1000 // 24 hours
-    }
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // CRITICAL
+        domain: process.env.NODE_ENV === 'production' ? '.onrender.com' : undefined
+    },
+    proxy: true // Trust the first proxy
 }));
 
 // Initialize passport, must be after session middleware
