@@ -56,7 +56,8 @@ passport.deserializeUser(async (id, done) => {
 passport.use(new GoogleStrategy.Strategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: "/auth/google/callback",
+    callbackURL: "https://back-multi-api.onrender.com/auth/google/callback",
+    proxy: true  // ⚠️ IMPORTANT: This tells Passport to trust the proxy (Render)
 }, async (accessToken, refreshToken, profile, done) => {
     try {
         // Use Google ID as username fallback
