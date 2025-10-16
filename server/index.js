@@ -1,3 +1,421 @@
+Arshit-Jain/Multi-API-Research
+main
+
+GITHUB
+
+How would I deploy this through vercel?
+
+I'll help you deploy this application to Vercel. However, there are some important considerations since your app has both a client (React/Vite) and a server (Express/Node.js) with a PostgreSQL database.
+
+Deployment Strategy
+Vercel is primarily designed for frontend applications and serverless functions. Here's the recommended approach:
+
+Option 1: Deploy Frontend to Vercel + Backend Elsewhere (Recommended)
+Frontend (Vercel):
+
+Deploy the React client to Vercel
+Configure environment variables for API endpoints
+Backend (Render/Railway/Heroku):
+
+Deploy the Express server to a platform that supports long-running Node.js processes
+Use a managed PostgreSQL service (like Supabase, Neon, or Railway's database)
+Option 2: Adapt Backend to Vercel Serverless Functions (More Complex)
+Convert your Express routes to Vercel serverless functions. This requires significant refactoring.
+
+Deployment Guide - Option 1 (Recommended)
+Vercel Deployment Guide
+Code 
+I've created a comprehensive deployment guide for your application. Here's a summary of the approach:
+
+Quick Deployment Steps:
+1. Frontend (Vercel) ✅
+Deploy your React/Vite client
+Free hosting with automatic deployments
+CDN and HTTPS included
+2. Backend (Render/Railway) 🚀
+Deploy your Express server
+Use a managed PostgreSQL database
+Free tier available for testing
+3. Key Changes Needed:
+Client (client/src/services/api.js):
+
+javascript
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
+Server (server/index.js):
+
+javascript
+app.use(cors({
+    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+    credentials: true
+}));
+Why Not Serverless?
+Your Express backend with long-running processes, PostgreSQL connections, and session management isn't ideal for Vercel's serverless functions. Using Render or Railway for the backend provides:
+
+Persistent connections
+Session management
+Background processes
+Better database handling
+Quick Start:
+Push code to GitHub
+Deploy frontend to Vercel (point to client directory)
+Deploy backend to Render (point to server directory)
+Set up PostgreSQL database (Supabase/Neon)
+Configure environment variables on both platforms
+Update Google OAuth redirects
+Would you like me to create specific configuration files for any of these platforms, or help with a different deployment strategy?
+
+
+You can’t sign in because Multi API Research sent an invalid request. You can try again later, or contact the developer about this issue. Learn more about this error
+If you are a developer of Multi API Research, see error details.
+Error 400: redirect_uri_mismatch
+
+Error 400: redirect_uri_mismatch
+You can't sign in to this app because it doesn't comply with Google's OAuth 2.0 policy. If you're the app developer, register the redirect URI in the Google Cloud Console.
+Request details: redirect_uri=http://back-multi-api.onrender.com/auth/google/callback flowName=GeneralOAuthFlow
+
+This error occurs because the redirect URI in your Google OAuth configuration doesn't match what you've registered in Google Cloud Console. Let me help you fix this:
+
+Fix Google OAuth redirect_uri_mismatch
+Code 
+Quick Fix (3 Steps):
+1. Add to Google Cloud Console ⚡
+Go to Google Cloud Console → APIs & Services → Credentials → Edit your OAuth Client
+
+Add these Authorized redirect URIs:
+
+https://back-multi-api.onrender.com/auth/google/callback
+http://back-multi-api.onrender.com/auth/google/callback
+2. Update server/index.js 🔧
+Add proxy: true to your Google Strategy:
+
+javascript
+passport.use(new GoogleStrategy.Strategy({
+    clientID: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    callbackURL: "/auth/google/callback",
+    proxy: true  // ⚠️ ADD THIS LINE
+}, async (accessToken, refreshToken, profile, done) => {
+    // ... your existing code
+}));
+3. Redeploy on Render 🚀
+bash
+git add .
+git commit -m "Fix Google OAuth proxy settings"
+git push origin main
+The key issue is that Render uses HTTPS but your app might be sending HTTP in the redirect URI. Adding proxy: true tells Passport.js to trust the proxy headers and use the correct HTTPS protocol.
+
+Try these changes and let me know if you still get the error!
+
+
+Access blocked: back-multi-api.onrender.com’s request is invalid
+arshit.0303@gmail.com
+You can’t sign in because back-multi-api.onrender.com sent an invalid request. You can try again later, or contact the developer about this issue. Learn more about this error
+If you are a developer of back-multi-api.onrender.com, see error details.
+Error 400: redirect_uri_mismatch
+
+You can't sign in to this app because it doesn't comply with Google's OAuth 2.0 policy. If you're the app developer, register the redirect URI in the Google Cloud Console.
+Request details: access_type=online scope=https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email openid response_type=code redirect_uri=http://back-multi-api.onrender.com/auth/google/callback flowName=GeneralOAuthFlow client_id=1010824844525-pnvq0u1p8vc5mg2if27rqp0odrl3vbvm.apps.googleusercontent.com
+
+The error shows it's still using http:// instead of https://. The issue is that even with proxy: true, the callback URL is being constructed as HTTP. Let me help you fix this properly:
+
+Fix Google OAuth redirect_uri_mismatch
+Code ∙ Version 2 
+Immediate Fix: Use Full HTTPS URL
+Update your server/index.js with the full HTTPS callback URL:
+
+javascript
+// At the top with other imports
+import dotenv from 'dotenv';
+dotenv.config();
+
+// ... other code ...
+
+// Passport Google Strategy - Use FULL HTTPS URL
+passport.use(new GoogleStrategy.Strategy({
+    clientID: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    callbackURL: "https://back-multi-api.onrender.com/auth/google/callback", // ✅ FULL URL
+    proxy: true
+}, async (accessToken, refreshToken, profile, done) => {
+    // ... your existing code
+}));
+Better Solution: Use Environment Variable
+Update server/.env (and Render environment variables):
+
+env
+BACKEND_URL=https://back-multi-api.onrender.com
+GOOGLE_CLIENT_ID=1010824844525-pnvq0u1p8vc5mg2if27rqp0odrl3vbvm.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-secret-here
+FRONTEND_URL=https://your-app.vercel.app
+Then update server/index.js:
+
+javascript
+passport.use(new GoogleStrategy.Strategy({
+    clientID: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    callbackURL: `${process.env.BACKEND_URL}/auth/google/callback`, // ✅ Dynamic
+    proxy: true
+}, async (accessToken, refreshToken, profile, done) => {
+    // ... your existing code
+}));
+```
+
+## Add to Google Cloud Console
+
+**CRITICAL:** Add this EXACT URL to Google Cloud Console:
+```
+https://back-multi-api.onrender.com/auth/google/callback
+```
+
+Steps:
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. APIs & Services → Credentials
+3. Click on your OAuth 2.0 Client ID: `1010824844525-pnvq0u1p8vc5mg2if27rqp0odrl3vbvm`
+4. Under **Authorized redirect URIs**, add:
+```
+   https://back-multi-api.onrender.com/auth/google/callback
+```
+5. Also add for local testing:
+```
+   http://localhost:3000/auth/google/callback
+```
+6. Click **SAVE**
+
+## Add Environment Variable to Render
+
+1. Go to your Render dashboard
+2. Select your service
+3. Go to **Environment** tab
+4. Add:
+```
+   BACKEND_URL = https://back-multi-api.onrender.com
+```
+5. Save changes (will trigger redeploy)
+
+## Quick Test
+
+After updating and redeploying, test by visiting:
+```
+https://back-multi-api.onrender.com/auth/google
+It should redirect you to Google's login page, and after login, redirect back to your frontend.
+
+The key issue: Render provides HTTPS but the callback URL was being constructed as HTTP. Using the full HTTPS URL or environment variable with HTTPS fixes this.
+
+Try this and let me know if it works!
+
+
+Internal Server Error
+
+on this link: https://back-multi-api.onrender.com/auth/google/callback?code=4%2F0AVGzR1ADIT_MNRGqKDA0A-GIap92XzCPGFxxDFSt-nIfD56wM7e_wC1tMY9RN2isu7W9Mw&scope=email+profile+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email+openid+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.profile&authuser=0&prompt=none
+Great progress! Google OAuth is working now, but there's an error in your callback handler. Let's check the Render logs to see what's happening.
+
+Fix OAuth Callback Internal Server Error
+Code 
+Now let's check what's causing the error. Here's what you need to do:
+
+1. Check Render Logs (IMPORTANT) 🔍
+Go to your Render Dashboard
+Click on your back-multi-api service
+Click on Logs tab
+Look for error messages around the time you tried to login
+Look for errors like:
+
+Database connection errors
+Missing environment variables
+"Cannot read property..." errors
+SQL errors
+2. Verify Environment Variables on Render ⚙️
+Make sure these are all set in Render:
+
+bash
+# Database
+DB_HOST=your-database-host
+DB_PORT=5432
+DB_NAME=your-database-name
+DB_USER=your-database-user
+DB_PASSWORD=your-database-password
+
+# OAuth
+GOOGLE_CLIENT_ID=1010824844525-pnvq0u1p8vc5mg2if27rqp0odrl3vbvm.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-secret
+BACKEND_URL=https://back-multi-api.onrender.com
+FRONTEND_URL=https://your-app.vercel.app
+
+# Session
+SESSION_SECRET=some-random-secret-string
+NODE_ENV=production
+3. Update Your Code
+Replace the Google OAuth section in server/index.js with the code from the artifact above. Key changes:
+
+Better error handling in OAuth callback
+Explicit session save before redirect
+Error logging to help debug
+Health check endpoints for testing
+4. Quick Database Test 🗄️
+Add this test endpoint to check if database is working:
+
+javascript
+app.get("/test-db", async (req, res) => {
+    try {
+        const pool = (await import('./database/connection.js')).default;
+        await pool.query('SELECT 1');
+        res.json({ success: true, message: "Database connected" });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+Then visit: https://back-multi-api.onrender.com/test-db
+
+5. Common Causes & Solutions
+Most Likely Issue: Database Connection
+Check if your database is configured:
+
+bash
+# In Render logs, look for:
+"Error connecting to database"
+"Connection refused"
+"ECONNREFUSED"
+Solution: Make sure your PostgreSQL database is:
+
+Created and running (Supabase/Neon/Railway)
+Connection string is correct in environment variables
+Schema is set up (run schema.sql)
+Issue: Session Cookie Problem
+Check:
+
+javascript
+cookie: {
+    secure: true, // Must be true for HTTPS
+    sameSite: 'none' // Required for cross-origin
+}
+6. Test Locally First 🧪
+bash
+cd server
+
+# Set environment variables
+export GOOGLE_CLIENT_ID=your-id
+export GOOGLE_CLIENT_SECRET=your-secret
+export FRONTEND_URL=http://localhost:5173
+export BACKEND_URL=http://localhost:3000
+
+# Start server
+npm start
+
+# Test OAuth
+# Open: http://localhost:3000/auth/google
+Can You Share the Error?
+Please check Render logs and share:
+
+The exact error message
+The stack trace if available
+Any database connection errors
+This will help me give you a more specific fix!
+
+
+
+index.js
+783 lines
+
+js
+
+https://back-multi-api.onrender.com/auth/google/callback?code=4%2F0AVGzR1B7yf2A8gafa6b8eO1UcVuuXIclg9FvHw2gCTyZdiI7K9drF8TzSRKx-8hX_BNsmA&scope=email+profile+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.email+openid+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fuserinfo.profile&authuser=0&prompt=none
+
+same error
+
+The issue is with your session configuration for production. You need to update the cookie settings for cross-origin requests. Here's the fix:
+
+Fix OAuth Callback Internal Server Error
+Code ∙ Version 2 
+Now update your server/index.js file:
+
+Quick Fix - Update Session Configuration
+Replace the session configuration section (around line 24-33) with:
+
+javascript
+// Session configuration - FIXED for production
+app.use(session({
+    secret: process.env.SESSION_SECRET || 'your-secret-key-change-in-production',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+        secure: process.env.NODE_ENV === 'production', // true for HTTPS
+        httpOnly: true,
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // CRITICAL
+        domain: process.env.NODE_ENV === 'production' ? '.onrender.com' : undefined
+    },
+    proxy: true // Trust the first proxy
+}));
+```
+
+## Add Environment Variable to Render
+
+1. Go to your Render dashboard
+2. Click on your service
+3. Go to **Environment** tab
+4. Add:
+```
+   NODE_ENV=production
+Save (will trigger redeploy)
+Alternative Simpler Fix (If Above Doesn't Work)
+If the session is still not working, try this simpler approach:
+
+javascript
+// Session configuration - Simplified for Render
+app.use(session({
+    secret: process.env.SESSION_SECRET || 'your-secret-key-change-in-production',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+        secure: true, // Always true on Render (HTTPS)
+        httpOnly: true,
+        maxAge: 24 * 60 * 60 * 1000,
+        sameSite: 'none' // Required for cross-origin
+    },
+    proxy: true
+}));
+Check Render Logs
+After redeploying, visit the callback URL again and check the Render logs for:
+
+bash
+# Should see these logs:
+Google callback received
+OAuth successful, user: [user-id]
+Session saved, redirecting to frontend
+If Still Getting Error
+The error might be in the database connection. Add this debug endpoint to check:
+
+javascript
+// Add before your other routes
+app.get("/debug/session", (req, res) => {
+    res.json({
+        hasSession: !!req.session,
+        sessionId: req.sessionID,
+        userId: req.session?.userId,
+        isAuthenticated: !!req.session?.userId
+    });
+});
+Then test:
+
+Visit: https://back-multi-api.onrender.com/debug/session
+Try OAuth again
+Visit debug endpoint again to see if session persisted
+Which specific error message are you seeing in the Render logs? That will help me pinpoint the exact issue.
+
+
+give me whole index file
+
+Complete index.js with OAuth Fix
+Code 
+
+
+Session limit reached ∙ resets 6:00 PM
+Upgrade
+
+
+
+
+
 import express from "express";
 import cors from "cors";
 import session from "express-session";
@@ -23,19 +441,18 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Session configuration
+// Session configuration - FIXED for production
 app.use(session({
     secret: process.env.SESSION_SECRET || 'your-secret-key-change-in-production',
     resave: false,
     saveUninitialized: false,
     cookie: {
-        secure: process.env.NODE_ENV === 'production', // true for HTTPS
+        secure: process.env.NODE_ENV === 'production', // true for HTTPS in production
         httpOnly: true,
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // CRITICAL
-        domain: process.env.NODE_ENV === 'production' ? '.onrender.com' : undefined
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // CRITICAL for cross-origin
     },
-    proxy: true // Trust the first proxy
+    proxy: true // Trust first proxy (Render)
 }));
 
 // Initialize passport, must be after session middleware
@@ -44,13 +461,17 @@ app.use(passport.session());
 
 // Serialize user (via ID)
 passport.serializeUser((user, done) => {
+    console.log('Serializing user:', user.id);
     done(null, user.id);
 });
+
 passport.deserializeUser(async (id, done) => {
     try {
+        console.log('Deserializing user:', id);
         const user = await userQueries.findById(id);
         done(null, user);
     } catch (e) {
+        console.error('Error deserializing user:', e);
         done(e);
     }
 });
@@ -59,16 +480,32 @@ passport.deserializeUser(async (id, done) => {
 passport.use(new GoogleStrategy.Strategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: "https://back-multi-api.onrender.com/auth/google/callback",
-    proxy: true  // ⚠️ IMPORTANT: This tells Passport to trust the proxy (Render)
+    callbackURL: `${process.env.BACKEND_URL || 'http://localhost:3000'}/auth/google/callback`,
+    proxy: true
 }, async (accessToken, refreshToken, profile, done) => {
     try {
-        // Use Google ID as username fallback
-        let user = await userQueries.findByEmail(profile.emails[0].value);
+        console.log('Google OAuth callback - Profile:', {
+            id: profile.id,
+            email: profile.emails?.[0]?.value,
+            displayName: profile.displayName
+        });
+
+        // Check if email exists
+        if (!profile.emails || !profile.emails[0]) {
+            console.error('No email in Google profile');
+            return done(new Error('No email provided by Google'), null);
+        }
+
+        const email = profile.emails[0].value;
+
+        // Check if user exists
+        let user = await userQueries.findByEmail(email);
+        
         if (!user) {
-            // Generate a unique username by appending random digits
+            console.log('Creating new user for email:', email);
+            
+            // Generate unique username
             const toBaseUsername = (name) => {
-                // Prefer displayName -> email local part -> profile id
                 const raw = (name || '').toString().toLowerCase();
                 const sanitized = raw
                     .replace(/\s+/g, '_')
@@ -80,9 +517,8 @@ passport.use(new GoogleStrategy.Strategy({
             };
 
             const generateUniqueUsername = async (base) => {
-                // Try several random suffixes before falling back to timestamp
                 for (let i = 0; i < 10; i++) {
-                    const suffix = Math.random().toString().slice(2, 8); // 6 digits
+                    const suffix = Math.random().toString().slice(2, 8);
                     const candidate = `${base}_${suffix}`;
                     const exists = await userQueries.findByUsername(candidate);
                     if (!exists) return candidate;
@@ -91,22 +527,28 @@ passport.use(new GoogleStrategy.Strategy({
             };
 
             const baseFromDisplay = profile.displayName;
-            const baseFromEmail = (profile.emails && profile.emails[0] && profile.emails[0].value)
-                ? profile.emails[0].value.split('@')[0]
-                : '';
+            const baseFromEmail = email.split('@')[0];
             const base = toBaseUsername(baseFromDisplay || baseFromEmail || profile.id);
             const uniqueUsername = await generateUniqueUsername(base);
 
+            console.log('Generated username:', uniqueUsername);
+
             user = await userQueries.create(
                 uniqueUsername,
-                profile.emails[0].value,
+                email,
                 "google-oauth",
                 false
             );
+
+            console.log('User created successfully:', user.id);
+        } else {
+            console.log('User already exists:', user.id);
         }
+
         return done(null, user);
     } catch (err) {
-        return done(err);
+        console.error('Error in Google OAuth strategy:', err);
+        return done(err, null);
     }
 }));
 
@@ -162,13 +604,33 @@ const requireAuth = (req, res, next) => {
     }
 };
 
+// Health check endpoint
+app.get("/health", (req, res) => {
+    res.json({ 
+        status: "ok", 
+        timestamp: new Date().toISOString(),
+        environment: process.env.NODE_ENV || 'development'
+    });
+});
+
+// Debug session endpoint
+app.get("/debug/session", (req, res) => {
+    res.json({
+        hasSession: !!req.session,
+        sessionId: req.sessionID,
+        userId: req.session?.userId,
+        isAuthenticated: !!req.session?.userId,
+        cookie: req.session?.cookie
+    });
+});
+
 // Routes
 app.get("/", (req, res) => {
-  res.send("Hello World");
+    res.send("Hello World");
 });
 
 app.get("/welcome", (req, res) => {
-  res.json({ message: "Welcome to the server" });
+    res.json({ message: "Welcome to the server" });
 });
 
 // Authentication routes
