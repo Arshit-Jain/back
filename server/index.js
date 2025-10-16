@@ -70,12 +70,25 @@ passport.use(new GoogleStrategy.Strategy({
     proxy: true
 }, async (accessToken, refreshToken, profile, done) => {
     try {
+        console.log('=== Google Strategy Called ===');
+        console.log('Profile ID:', profile.id);
+        console.log('Profile emails:', profile.emails);
+        console.log('Profile displayName:', profile.displayName);
+        
         if (!profile.emails || !profile.emails[0]) {
+            console.error('No email in Google profile');
             return done(new Error('No email provided by Google'));
         }
+        
         const email = profile.emails[0].value;
+        console.log('Processing email:', email);
+        
         let user = await userQueries.findByEmail(email);
+        console.log('Existing user found:', !!user);
+        
         if (!user) {
+            console.log('Creating new user for email:', email);
+            
             const toBaseUsername = (name) => {
                 const raw = (name || '').toString().toLowerCase();
                 const sanitized = raw
@@ -86,6 +99,7 @@ passport.use(new GoogleStrategy.Strategy({
                     .slice(0, 20);
                 return sanitized || `user_${(profile.id || '').toString().slice(0, 6)}`;
             };
+            
             const generateUniqueUsername = async (base) => {
                 for (let i = 0; i < 10; i++) {
                     const suffix = Math.random().toString().slice(2, 8);
@@ -95,14 +109,23 @@ passport.use(new GoogleStrategy.Strategy({
                 }
                 return `${base}_${Date.now().toString().slice(-6)}`;
             };
+            
             const baseFromDisplay = profile.displayName;
             const baseFromEmail = email.split('@')[0];
             const base = toBaseUsername(baseFromDisplay || baseFromEmail || profile.id);
             const uniqueUsername = await generateUniqueUsername(base);
+            
+            console.log('Generated username:', uniqueUsername);
+            
             user = await userQueries.create(uniqueUsername, email, "google-oauth", false);
+            console.log('User created successfully:', user.id);
+        } else {
+            console.log('User already exists:', user.id);
         }
+        
         return done(null, user);
     } catch (err) {
+        console.error('Google Strategy error:', err);
         return done(err);
     }
 }));
@@ -114,18 +137,44 @@ app.get("/auth/google", (req, res, next) => {
 
 app.get("/auth/google/callback",
     (req, res, next) => {
+        console.log('=== Google OAuth Callback Started ===');
+        console.log('Query params:', req.query);
+        console.log('Session ID:', req.sessionID);
+        
         passport.authenticate("google", {
             failureRedirect: `${FRONTEND_URL}/login?error=oauth_failed`,
             session: true,
         })(req, res, next);
     },
     (req, res) => {
-        req.session.userId = req.user.id;
-        req.session.username = req.user.username;
-        req.session.save((err) => {
-            if (err) return res.redirect(`${FRONTEND_URL}/login?error=session_failed`);
-            res.redirect(FRONTEND_URL);
-        });
+        try {
+            console.log('=== OAuth Success Handler ===');
+            console.log('User from passport:', req.user ? { id: req.user.id, username: req.user.username, email: req.user.email } : 'No user');
+            console.log('Session before save:', { id: req.sessionID, userId: req.session?.userId });
+            
+            if (!req.user) {
+                console.error('No user object from passport');
+                return res.redirect(`${FRONTEND_URL}/login?error=no_user`);
+            }
+            
+            req.session.userId = req.user.id;
+            req.session.username = req.user.username;
+            
+            console.log('Session data set:', { userId: req.session.userId, username: req.session.username });
+            
+            req.session.save((err) => {
+                if (err) {
+                    console.error('Session save error:', err);
+                    return res.redirect(`${FRONTEND_URL}/login?error=session_failed`);
+                }
+                
+                console.log('Session saved successfully, redirecting to:', FRONTEND_URL);
+                res.redirect(FRONTEND_URL);
+            });
+        } catch (error) {
+            console.error('OAuth callback error:', error);
+            res.redirect(`${FRONTEND_URL}/login?error=callback_failed`);
+        }
     }
 );
 
@@ -145,6 +194,18 @@ app.get("/health", (req, res) => {
 
 app.get("/debug/session", (req, res) => {
     res.json({ id: req.sessionID, userId: req.session?.userId, cookie: req.session?.cookie });
+});
+
+// Database connection test
+app.get("/test-db", async (req, res) => {
+    try {
+        const pool = (await import('./database/connection.js')).default;
+        await pool.query('SELECT 1');
+        res.json({ success: true, message: "Database connected" });
+    } catch (error) {
+        console.error('Database test error:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
 });
 
 // Basic routes
