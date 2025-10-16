@@ -5,6 +5,7 @@ import bcrypt from "bcryptjs";
 import dotenv from "dotenv";
 import passport from "passport";
 import GoogleStrategy from "passport-google-oauth20";
+import pool from "./database/connection.js"
 
 import { userQueries, chatQueries, messageQueries, dailyChatQueries } from "./database/queries.js";
 import { OpenAIService } from "./services/openai.js";
@@ -196,16 +197,186 @@ app.get("/debug/session", (req, res) => {
     res.json({ id: req.sessionID, userId: req.session?.userId, cookie: req.session?.cookie });
 });
 
-// Database connection test
+// Database connection test endpoint - Enhanced version
 app.get("/test-db", async (req, res) => {
-    try {
-        const pool = (await import('./database/connection.js')).default;
-        await pool.query('SELECT 1');
-        res.json({ success: true, message: "Database connected" });
-    } catch (error) {
-        console.error('Database test error:', error);
-        res.status(500).json({ success: false, error: error.message });
+  let client;
+  
+  try {
+    
+    // Get a client from the pool
+    client = await pool.connect();
+    
+    // Test 1: Basic connectivity
+    const basicTest = await client.query('SELECT 1 as test');
+    
+    // Test 2: Get PostgreSQL version and time
+    const versionResult = await client.query('SELECT version() as pg_version, NOW() as server_time');
+    const pgVersion = versionResult.rows[0].pg_version.split(',')[0];
+    const serverTime = versionResult.rows[0].server_time;
+    
+    // Test 3: Check if application tables exist
+    const tablesResult = await client.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+      AND table_name IN ('users', 'chats', 'messages', 'user_daily_chats')
+      ORDER BY table_name
+    `);
+    
+    const existingTables = tablesResult.rows.map(r => r.table_name);
+    const requiredTables = ['users', 'chats', 'messages', 'user_daily_chats'];
+    const missingTables = requiredTables.filter(t => !existingTables.includes(t));
+    
+    // Test 4: Get row counts for existing tables
+    const tableCounts = {};
+    for (const table of existingTables) {
+      const countResult = await client.query(`SELECT COUNT(*) as count FROM ${table}`);
+      tableCounts[table] = parseInt(countResult.rows[0].count);
     }
+    
+    // Test 5: Pool statistics
+    const poolStats = {
+      totalConnections: pool.totalCount,
+      idleConnections: pool.idleCount,
+      waitingRequests: pool.waitingCount
+    };
+    
+    // Determine overall status
+    const allTablesExist = missingTables.length === 0;
+    const status = allTablesExist ? 'fully_configured' : 'needs_setup';
+    
+    // Build response
+    const response = {
+      success: true,
+      status: status,
+      message: allTablesExist 
+        ? "Database connected and fully configured" 
+        : "Database connected but needs table setup",
+      connection: {
+        connected: true,
+        postgresql_version: pgVersion,
+        server_time: serverTime,
+        connection_type: 'Supabase PostgreSQL'
+      },
+      tables: {
+        existing: existingTables,
+        missing: missingTables,
+        counts: tableCounts,
+        all_present: allTablesExist
+      },
+      pool: poolStats,
+      recommendations: []
+    };
+    
+    // Add recommendations if needed
+    if (!allTablesExist) {
+      response.recommendations.push({
+        action: 'setup_database',
+        message: 'Run "npm run setup-db" to create missing tables',
+        missing_tables: missingTables
+      });
+    }
+    
+    if (poolStats.totalConnections > 15) {
+      response.recommendations.push({
+        action: 'monitor_connections',
+        message: 'High number of active connections detected',
+        current: poolStats.totalConnections,
+        max: 20
+      });
+    }
+    
+    res.json(response);
+    
+  } catch (error) {
+    console.error('Database test error:', error);
+    
+    // Detailed error response
+    const errorResponse = {
+      success: false,
+      status: 'connection_failed',
+      error: {
+        message: error.message,
+        code: error.code,
+        type: error.name
+      },
+      troubleshooting: []
+    };
+    
+    // Add specific troubleshooting based on error type
+    if (error.code === 'ENOTFOUND') {
+      errorResponse.troubleshooting.push({
+        issue: 'Host not found',
+        solutions: [
+          'Check SUPABASE_DB_URL in .env file',
+          'Verify connection string format',
+          'Ensure Supabase project is active'
+        ]
+      });
+    } else if (error.code === 'ECONNREFUSED') {
+      errorResponse.troubleshooting.push({
+        issue: 'Connection refused',
+        solutions: [
+          'Check database port (5432 for direct, 6543 for pooler)',
+          'Verify Supabase project is running',
+          'Check firewall settings'
+        ]
+      });
+    } else if (error.message.includes('password')) {
+      errorResponse.troubleshooting.push({
+        issue: 'Authentication failed',
+        solutions: [
+          'Verify database password in connection string',
+          'Check if password contains special characters (URL encode them)',
+          'Reset password in Supabase dashboard if needed'
+        ]
+      });
+    } else if (error.code === 'ETIMEDOUT') {
+      errorResponse.troubleshooting.push({
+        issue: 'Connection timeout',
+        solutions: [
+          'Check your internet connection',
+          'Verify IP is allowed in Supabase settings',
+          'Check if Supabase project is paused (free tier)'
+        ]
+      });
+    } else if (error.message.includes('no pg_hba.conf entry')) {
+      errorResponse.troubleshooting.push({
+        issue: 'IP not allowed',
+        solutions: [
+          'Go to Supabase Dashboard → Settings → Database',
+          'Add your IP to allowed connections',
+          'Or allow 0.0.0.0/0 for testing (not recommended for production)'
+        ]
+      });
+    } else {
+      errorResponse.troubleshooting.push({
+        issue: 'Unknown error',
+        solutions: [
+          'Check server logs for detailed error information',
+          'Verify all environment variables are set',
+          'Try restarting the server',
+          'Contact support if issue persists'
+        ]
+      });
+    }
+    
+    // Add environment check
+    errorResponse.environment = {
+      node_env: process.env.NODE_ENV || 'development',
+      has_supabase_url: !!process.env.SUPABASE_DB_URL,
+      has_database_url: !!process.env.DATABASE_URL,
+      port: process.env.PORT || 3000
+    };
+    
+    res.status(500).json(errorResponse);
+    
+  } finally {
+    // Always release the client back to the pool
+    if (client) {
+      client.release();
+    }
+  }
 });
 
 // Basic routes
