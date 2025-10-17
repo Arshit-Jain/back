@@ -7,6 +7,7 @@ import dotenv from "dotenv";
 import passport from "passport";
 import GoogleStrategy from "passport-google-oauth20";
 import pool from "./database/connection.js";
+import jwt from 'jsonwebtoken';
 
 import {
   userQueries,
@@ -23,6 +24,9 @@ dotenv.config();
 
 const app = express();
 
+
+const JWT_SECRET = process.env.JWT_SECRET || 'your-jwt-secret-change-in-production';
+
 // ✅ Initialize Postgres session store
 const PgSession = connectPgSimple(session);
 
@@ -33,6 +37,8 @@ app.set("trust proxy", 1);
 const normalizeUrl = (url) => (url || "").replace(/\/+$/, "");
 const FRONTEND_URL = normalizeUrl(process.env.FRONTEND_URL || "http://localhost:5173");
 const BACKEND_URL = normalizeUrl(process.env.BACKEND_URL || "http://localhost:3000");
+
+
 
 // ✅ CORS must be configured BEFORE session middleware
 app.use(
@@ -73,6 +79,8 @@ app.use(
 // ✅ Initialize Passport (AFTER session)
 app.use(passport.initialize());
 app.use(passport.session());
+
+
 
 // Test endpoint to verify server is running
 app.get("/test", (req, res) => {
@@ -258,13 +266,10 @@ app.get("/auth/google/callback",
 app.post("/api/auth/oauth-complete", async (req, res) => {
     try {
         console.log('=== OAuth Complete Endpoint Called ===');
-        console.log('Request body:', req.body);
-        console.log('Session before:', req.sessionID);
         
         const { token } = req.body;
         
         if (!token) {
-            console.error('No token provided');
             return res.status(400).json({ success: false, error: 'Token required' });
         }
         
@@ -272,15 +277,12 @@ app.post("/api/auth/oauth-complete", async (req, res) => {
         let decoded;
         try {
             decoded = JSON.parse(Buffer.from(token, 'base64').toString());
-            console.log('=== Decoded token data ===', decoded);
         } catch (decodeError) {
-            console.error('Token decode error:', decodeError);
             return res.status(400).json({ success: false, error: 'Invalid token format' });
         }
         
         // Verify token is recent (within 2 minutes)
         if (Date.now() - decoded.timestamp > 120000) {
-            console.error('Token expired');
             return res.status(400).json({ success: false, error: 'Token expired' });
         }
         
@@ -288,58 +290,39 @@ app.post("/api/auth/oauth-complete", async (req, res) => {
         const user = await userQueries.findById(decoded.userId);
         
         if (!user) {
-            console.error('User not found:', decoded.userId);
             return res.status(400).json({ success: false, error: 'User not found' });
         }
         
-        console.log('=== User found ===', {
-            id: user.id,
-            username: user.username,
-            email: user.email
-        });
+        console.log('=== User found, creating JWT ===');
         
-        // Establish session - set userId BEFORE logIn
-        req.session.userId = user.id;
-        req.session.username = user.username;
+        // Create JWT token
+        const jwtToken = jwt.sign(
+            { 
+                id: user.id, 
+                username: user.username,
+                email: user.email,
+                is_premium: user.is_premium
+            },
+            JWT_SECRET,
+            { expiresIn: '7d' } // Token valid for 7 days
+        );
         
-        console.log('=== Logging in user with passport ===');
+        console.log('=== JWT created successfully ===');
         
-        // Login user with passport
-        req.logIn(user, (loginErr) => {
-            if (loginErr) {
-                console.error('Login error:', loginErr);
-                return res.status(500).json({ success: false, error: 'Login failed' });
-            }
-            
-            console.log('=== User logged in, saving session ===');
-            
-            // IMPORTANT: Regenerate session to ensure fresh cookie
-            req.session.save((err) => {
-                if (err) {
-                    console.error('Session save error:', err);
-                    return res.status(500).json({ success: false, error: 'Session creation failed' });
-                }
-                
-                console.log('=== Session established successfully ===');
-                console.log('Session ID:', req.sessionID);
-                console.log('Session userId:', req.session.userId);
-                console.log('Cookie settings:', req.session.cookie);
-                
-                res.json({ 
-                    success: true, 
-                    user: { 
-                        id: user.id, 
-                        username: user.username, 
-                        email: user.email, 
-                        is_premium: user.is_premium 
-                    } 
-                });
-            });
+        res.json({ 
+            success: true, 
+            token: jwtToken,
+            user: { 
+                id: user.id, 
+                username: user.username, 
+                email: user.email, 
+                is_premium: user.is_premium 
+            } 
         });
         
     } catch (error) {
         console.error('OAuth complete error:', error);
-        res.status(500).json({ success: false, error: 'Internal server error', details: error.message });
+        res.status(500).json({ success: false, error: 'Internal server error' });
     }
 });
 
@@ -361,18 +344,33 @@ app.get("/auth/session", (req, res) => {
 });
 
 // Auth middleware
-const requireAuth = (req, res, next) => {
-    console.log('=== Auth Middleware Check ===');
-    console.log('Session userId:', req.session?.userId);
-    console.log('Is authenticated:', req.isAuthenticated());
-    console.log('User:', req.user);
+// JWT Authentication Middleware
+const authenticateJWT = (req, res, next) => {
+    const authHeader = req.headers.authorization;
     
-    if (req.session?.userId || req.isAuthenticated()) {
+    if (!authHeader) {
+        // Fallback to session-based auth for backwards compatibility
+        if (req.session?.userId || req.isAuthenticated?.()) {
+            return next();
+        }
+        return res.status(401).json({ error: 'Authentication required', redirect: '/login' });
+    }
+    
+    const token = authHeader.split(' ')[1]; // Bearer <token>
+    
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        req.user = decoded;
+        req.session = { userId: decoded.id, username: decoded.username }; // For compatibility
         next();
-    } else {
-        res.status(401).json({ error: 'Authentication required', redirect: '/login' });
+    } catch (error) {
+        console.error('JWT verification failed:', error.message);
+        return res.status(401).json({ error: 'Invalid token', redirect: '/login' });
     }
 };
+
+// Replace requireAuth with authenticateJWT
+const requireAuth = authenticateJWT;
 
 // Health and debug endpoints
 app.get("/health", (req, res) => {
@@ -594,22 +592,31 @@ app.post("/api/register", async (req, res) => {
             return res.status(400).json({ success: false, error: 'Email already exists' });
         }
 
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(email)) {
-            return res.status(400).json({ success: false, error: 'Invalid email format' });
-        }
-
-        if (password.length < 6) {
-            return res.status(400).json({ success: false, error: 'Password must be at least 6 characters long' });
-        }
-
         const passwordHash = await bcrypt.hash(password, 10);
         const newUser = await userQueries.create(username, email, passwordHash, false);
 
-        req.session.userId = newUser.id;
-        req.session.username = newUser.username;
+        // Create JWT token
+        const token = jwt.sign(
+            { 
+                id: newUser.id, 
+                username: newUser.username,
+                email: newUser.email,
+                is_premium: newUser.is_premium
+            },
+            JWT_SECRET,
+            { expiresIn: '7d' }
+        );
 
-        res.json({ success: true, user: { id: newUser.id, username: newUser.username, email: newUser.email, is_premium: newUser.is_premium } });
+        res.json({ 
+            success: true, 
+            token: token,
+            user: { 
+                id: newUser.id, 
+                username: newUser.username, 
+                email: newUser.email, 
+                is_premium: newUser.is_premium 
+            } 
+        });
     } catch (error) {
         console.error('Registration error:', error);
         res.status(500).json({ success: false, error: 'Internal server error' });
@@ -620,11 +627,32 @@ app.post("/api/login", async (req, res) => {
     try {
         const { username, password } = req.body;
         const user = await userQueries.findByUsername(username);
+        
         if (user && await bcrypt.compare(password, user.password_hash)) {
-            req.session.userId = user.id;
-            req.session.username = user.username;
+            // Create JWT token
+            const token = jwt.sign(
+                { 
+                    id: user.id, 
+                    username: user.username,
+                    email: user.email,
+                    is_premium: user.is_premium
+                },
+                JWT_SECRET,
+                { expiresIn: '7d' }
+            );
+            
             await userQueries.updateLastLogin(user.id);
-            res.json({ success: true, user: { id: user.id, username: user.username, email: user.email, is_premium: user.is_premium } });
+            
+            res.json({ 
+                success: true, 
+                token: token,
+                user: { 
+                    id: user.id, 
+                    username: user.username, 
+                    email: user.email, 
+                    is_premium: user.is_premium 
+                } 
+            });
         } else {
             res.status(401).json({ success: false, error: 'Invalid credentials' });
         }
@@ -641,13 +669,19 @@ app.post("/api/logout", (req, res) => {
     });
 });
 
-app.get("/api/auth/status", async (req, res) => {
+app.get("/api/auth/status", authenticateJWT, async (req, res) => {
     try {
-        if (req.session.userId) {
-            const user = await userQueries.findById(req.session.userId);
-            if (user) {
-                return res.json({ authenticated: true, user: { id: user.id, username: user.username, email: user.email, is_premium: user.is_premium } });
-            }
+        const user = await userQueries.findById(req.user.id);
+        if (user) {
+            return res.json({ 
+                authenticated: true, 
+                user: { 
+                    id: user.id, 
+                    username: user.username, 
+                    email: user.email, 
+                    is_premium: user.is_premium 
+                } 
+            });
         }
         res.json({ authenticated: false });
     } catch (error) {
