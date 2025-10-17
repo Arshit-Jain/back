@@ -399,55 +399,105 @@ app.get("/api/auth/status", requireAuth, async (req, res) => {
 // --------------------
 // Chat APIs - use req.user.id (JWT)
 // --------------------
-app.post("/api/chats", requireAuth, async (req, res) => {
-    try {
-        const { title } = req.body;
-        const userId = req.session.userId;
-        const user = await userQueries.findById(userId);
-        const canCreate = await dailyChatQueries.canCreateChat(userId, user.is_premium);
-        if (!canCreate) {
-            const limit = user.is_premium ? 20 : 5;
-            return res.status(403).json({ success: false, error: `Daily chat limit reached. You can create ${limit} chats per day.` });
-        }
-        const newChat = await chatQueries.create(userId, title || "New Chat");
-        await dailyChatQueries.incrementTodayCount(userId);
-        res.json({ success: true, chat: newChat });
-    } catch (error) {
-        console.error('Create chat error:', error);
-        res.status(500).json({ success: false, error: 'Failed to create chat' });
-    }
-});
+// Replace these endpoints in server/index.js
+// Change all req.session.userId to req.user.id
 
-app.get("/api/chats/:chatId", requireAuth, async (req, res) => {
+app.get("/api/chats", requireAuth, async (req, res) => {
     try {
-        const { chatId } = req.params;
-        const userId = req.session.userId;
-        const chat = await chatQueries.findById(chatId);
-        if (!chat || chat.user_id !== userId) {
-            return res.status(404).json({ success: false, error: 'Chat not found' });
-        }
-        res.json({ success: true, chat });
+      const userId = req.user.id
+      const chats = await chatQueries.findByUserId(userId)
+      res.json({ success: true, chats })
     } catch (error) {
-        console.error('Get chat info error:', error);
-        res.status(500).json({ success: false, error: 'Failed to fetch chat info' });
+      console.error("Get chats error:", error)
+      res.status(500).json({ success: false, error: "Failed to fetch chats" })
     }
-});
-
-app.get("/api/chats/:chatId/messages", requireAuth, async (req, res) => {
+  })
+  
+  app.post("/api/chats", requireAuth, async (req, res) => {
     try {
-        const { chatId } = req.params;
-        const userId = req.session.userId;
-        const chat = await chatQueries.findById(chatId);
-        if (!chat || chat.user_id !== userId) {
-            return res.status(404).json({ success: false, error: 'Chat not found' });
-        }
-        const messages = await messageQueries.findByChatId(chatId);
-        res.json({ success: true, messages });
+      const { title } = req.body
+      const userId = req.user.id
+      const user = await userQueries.findById(userId)
+      
+      if (!user) {
+        return res.status(404).json({ success: false, error: "User not found" })
+      }
+  
+      const canCreate = await dailyChatQueries.canCreateChat(userId, user.is_premium)
+      if (!canCreate) {
+        const limit = user.is_premium ? 20 : 5
+        return res.status(403).json({
+          success: false,
+          error: `Daily chat limit reached. You can create ${limit} chats per day.`
+        })
+      }
+  
+      const newChat = await chatQueries.create(userId, title || "New Chat")
+      await dailyChatQueries.incrementTodayCount(userId)
+      res.json({ success: true, chat: newChat })
     } catch (error) {
-        console.error('Get messages error:', error);
-        res.status(500).json({ success: false, error: 'Failed to fetch messages' });
+      console.error("Create chat error:", error)
+      res.status(500).json({ success: false, error: "Failed to create chat" })
     }
-});
+  })
+  
+  app.get("/api/chats/:chatId", requireAuth, async (req, res) => {
+    try {
+      const { chatId } = req.params
+      const userId = req.user.id
+      const chat = await chatQueries.findById(chatId)
+      
+      if (!chat || chat.user_id !== userId) {
+        return res.status(404).json({ success: false, error: "Chat not found" })
+      }
+      
+      res.json({ success: true, chat })
+    } catch (error) {
+      console.error("Get chat info error:", error)
+      res.status(500).json({ success: false, error: "Failed to fetch chat info" })
+    }
+  })
+  
+  app.get("/api/chats/:chatId/messages", requireAuth, async (req, res) => {
+    try {
+      const { chatId } = req.params
+      const userId = req.user.id
+      const chat = await chatQueries.findById(chatId)
+      
+      if (!chat || chat.user_id !== userId) {
+        return res.status(404).json({ success: false, error: "Chat not found" })
+      }
+      
+      const messages = await messageQueries.findByChatId(chatId)
+      res.json({ success: true, messages })
+    } catch (error) {
+      console.error("Get messages error:", error)
+      res.status(500).json({ success: false, error: "Failed to fetch messages" })
+    }
+  })
+  
+  app.get("/api/user/chat-count", requireAuth, async (req, res) => {
+    try {
+      const userId = req.user.id
+      const user = await userQueries.findById(userId)
+      
+      if (!user) {
+        return res.status(401).json({ success: false, error: "Unauthorized" })
+      }
+  
+      const todayCount = await dailyChatQueries.getTodayCount(userId)
+      const maxChats = user.is_premium ? 20 : 5
+      res.json({ 
+        success: true, 
+        todayCount, 
+        maxChats, 
+        isPremium: user.is_premium 
+      })
+    } catch (error) {
+      console.error("Get chat count error:", error)
+      res.status(500).json({ success: false, error: "Failed to get chat count" })
+    }
+  })
 
 // --------------------
 // Research flows (unchanged except auth uses req.user.id)
