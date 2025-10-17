@@ -669,6 +669,26 @@ app.post("/api/logout", (req, res) => {
     });
 });
 
+app.get("/api/user/chat-count", requireAuth, async (req, res) => {
+    try {
+      const userId = req.session.userId || req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ success: false, error: "Unauthorized" });
+      }
+  
+      // Get total chats
+      const totalChats = await chatQueries.countByUserId(userId);
+  
+      // Get today's chats (optional)
+      const todayCount = await dailyChatQueries.getTodayCount(userId);
+  
+      res.json({ success: true, totalChats, todayCount });
+    } catch (error) {
+      console.error("Get chat count error:", error);
+      res.status(500).json({ success: false, error: "Failed to fetch chat count" });
+    }
+  });
+
 app.get("/api/auth/status", authenticateJWT, async (req, res) => {
     try {
         const user = await userQueries.findById(req.user.id);
