@@ -47,7 +47,6 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Session configuration
 app.use(
     session({
       store: new PgSession({
@@ -65,7 +64,8 @@ app.use(
         httpOnly: true,
         sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
-        domain: process.env.NODE_ENV === "production" ? undefined : undefined, // Let browser handle it
+        path: '/',
+        domain: process.env.NODE_ENV === "production" ? undefined : undefined, // Let browser determine
       },
     })
   );
@@ -255,11 +255,11 @@ app.get("/auth/google/callback",
     }
 );
 
-// Add endpoint to exchange token for session
 app.post("/api/auth/oauth-complete", async (req, res) => {
     try {
         console.log('=== OAuth Complete Endpoint Called ===');
         console.log('Request body:', req.body);
+        console.log('Session before:', req.sessionID);
         
         const { token } = req.body;
         
@@ -268,11 +268,15 @@ app.post("/api/auth/oauth-complete", async (req, res) => {
             return res.status(400).json({ success: false, error: 'Token required' });
         }
         
-        console.log('=== Decoding token ===');
-        
         // Decode token
-        const decoded = JSON.parse(Buffer.from(token, 'base64').toString());
-        console.log('=== Decoded token data ===', decoded);
+        let decoded;
+        try {
+            decoded = JSON.parse(Buffer.from(token, 'base64').toString());
+            console.log('=== Decoded token data ===', decoded);
+        } catch (decodeError) {
+            console.error('Token decode error:', decodeError);
+            return res.status(400).json({ success: false, error: 'Invalid token format' });
+        }
         
         // Verify token is recent (within 2 minutes)
         if (Date.now() - decoded.timestamp > 120000) {
@@ -288,15 +292,17 @@ app.post("/api/auth/oauth-complete", async (req, res) => {
             return res.status(400).json({ success: false, error: 'User not found' });
         }
         
-        console.log('=== User found, establishing session ===', {
+        console.log('=== User found ===', {
             id: user.id,
             username: user.username,
             email: user.email
         });
         
-        // Establish session
+        // Establish session - set userId BEFORE logIn
         req.session.userId = user.id;
         req.session.username = user.username;
+        
+        console.log('=== Logging in user with passport ===');
         
         // Login user with passport
         req.logIn(user, (loginErr) => {
@@ -305,6 +311,9 @@ app.post("/api/auth/oauth-complete", async (req, res) => {
                 return res.status(500).json({ success: false, error: 'Login failed' });
             }
             
+            console.log('=== User logged in, saving session ===');
+            
+            // IMPORTANT: Regenerate session to ensure fresh cookie
             req.session.save((err) => {
                 if (err) {
                     console.error('Session save error:', err);
@@ -313,10 +322,8 @@ app.post("/api/auth/oauth-complete", async (req, res) => {
                 
                 console.log('=== Session established successfully ===');
                 console.log('Session ID:', req.sessionID);
-                console.log('Session data:', {
-                    userId: req.session.userId,
-                    username: req.session.username
-                });
+                console.log('Session userId:', req.session.userId);
+                console.log('Cookie settings:', req.session.cookie);
                 
                 res.json({ 
                     success: true, 
