@@ -56,6 +56,13 @@ app.use("/api/chats", authenticateJWT, emailRoutes);
 app.use("/api/user", authenticateJWT, userRoutes);
 
 // ===== Start Server =====
+
+app._router.stack
+  .filter(r => r.route)
+  .forEach(r => console.log("Route:", r.route.path));
+
+console.log("✅ Routes registered successfully");
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server (JWT-only) is running on port ${PORT}`);
