@@ -399,98 +399,55 @@ app.get("/api/auth/status", requireAuth, async (req, res) => {
 // --------------------
 // Chat APIs - use req.user.id (JWT)
 // --------------------
-app.get("/api/chats", requireAuth, async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const chats = await chatQueries.findByUserId(userId);
-    res.json({ success: true, chats });
-  } catch (error) {
-    console.error("Get chats error:", error);
-    res.status(500).json({ success: false, error: "Failed to fetch chats" });
-  }
-});
-
 app.post("/api/chats", requireAuth, async (req, res) => {
-  try {
-    const { title } = req.body;
-    const userId = req.user.id;
-    const user = await userQueries.findById(userId);
-    if (!user) return res.status(401).json({ success: false, error: "Unauthorized" });
-
-    const canCreate = await dailyChatQueries.canCreateChat(userId, user.is_premium);
-    if (!canCreate) {
-      const limit = user.is_premium ? 20 : 5;
-      return res.status(403).json({
-        success: false,
-        error: `Daily chat limit reached. You can create ${limit} chats per day.`,
-      });
+    try {
+        const { title } = req.body;
+        const userId = req.session.userId;
+        const user = await userQueries.findById(userId);
+        const canCreate = await dailyChatQueries.canCreateChat(userId, user.is_premium);
+        if (!canCreate) {
+            const limit = user.is_premium ? 20 : 5;
+            return res.status(403).json({ success: false, error: `Daily chat limit reached. You can create ${limit} chats per day.` });
+        }
+        const newChat = await chatQueries.create(userId, title || "New Chat");
+        await dailyChatQueries.incrementTodayCount(userId);
+        res.json({ success: true, chat: newChat });
+    } catch (error) {
+        console.error('Create chat error:', error);
+        res.status(500).json({ success: false, error: 'Failed to create chat' });
     }
-
-    const newChat = await chatQueries.create(userId, title || "New Chat");
-    await dailyChatQueries.incrementTodayCount(userId);
-    res.json({ success: true, chat: newChat });
-  } catch (error) {
-    console.error("Create chat error:", error);
-    res.status(500).json({ success: false, error: "Failed to create chat" });
-  }
 });
 
 app.get("/api/chats/:chatId", requireAuth, async (req, res) => {
-  try {
-    const { chatId } = req.params;
-    const userId = req.user.id;
-    const chat = await chatQueries.findById(chatId);
-    if (!chat || chat.user_id !== userId) {
-      return res.status(404).json({ success: false, error: "Chat not found" });
+    try {
+        const { chatId } = req.params;
+        const userId = req.session.userId;
+        const chat = await chatQueries.findById(chatId);
+        if (!chat || chat.user_id !== userId) {
+            return res.status(404).json({ success: false, error: 'Chat not found' });
+        }
+        res.json({ success: true, chat });
+    } catch (error) {
+        console.error('Get chat info error:', error);
+        res.status(500).json({ success: false, error: 'Failed to fetch chat info' });
     }
-    res.json({ success: true, chat });
-  } catch (error) {
-    console.error("Get chat info error:", error);
-    res.status(500).json({ success: false, error: "Failed to fetch chat info" });
-  }
 });
 
-app.post("/api/chats/:chatId/messages", requireAuth, async (req, res) => {
+app.get("/api/chats/:chatId/messages", requireAuth, async (req, res) => {
     try {
-      const { chatId } = req.params
-      const { message, messageType = "regular" } = req.body
-      const userId = req.user.id
-      
-      const chat = await chatQueries.findById(chatId)
-      if (!chat || chat.user_id !== userId) {
-        return res.status(404).json({ success: false, error: "Chat not found" })
-      }
-      
-      await messageQueries.create(chatId, message, true)
-      const result = await OpenAIService.generateTitleAndQuestions(message)
-      
-      if (result.success) {
-        const generatedTitle = result.title
-        const questions = result.questions
-        await chatQueries.updateTitle(chatId, generatedTitle)
-        
-        const responseText = `I'd like to help you refine your research topic. To provide you with the most relevant research guidance, I have a few clarifying questions:\n\n${questions.map((q, i) => `${i + 1}. ${q}`).join("\n\n")}`
-        
-        await messageQueries.create(chatId, responseText, false)
-        
-        res.json({ 
-          success: true, 
-          response: responseText, 
-          messageType: "clarifying_questions", 
-          questions, 
-          title: generatedTitle
-        })
-      } else {
-        const errorResponse = "I'm not able to find the answer right now. Please try again."
-        await messageQueries.create(chatId, errorResponse, false)
-        await chatQueries.markAsError(chatId)
-        res.json({ success: true, response: errorResponse, title: "Research Topic..." })
-      }
+        const { chatId } = req.params;
+        const userId = req.session.userId;
+        const chat = await chatQueries.findById(chatId);
+        if (!chat || chat.user_id !== userId) {
+            return res.status(404).json({ success: false, error: 'Chat not found' });
+        }
+        const messages = await messageQueries.findByChatId(chatId);
+        res.json({ success: true, messages });
     } catch (error) {
-      console.error("Legacy message error:", error)
-      res.status(500).json({ success: false, error: "Failed to send message" })
+        console.error('Get messages error:', error);
+        res.status(500).json({ success: false, error: 'Failed to fetch messages' });
     }
-  })
+});
 
 // --------------------
 // Research flows (unchanged except auth uses req.user.id)
@@ -538,7 +495,8 @@ app.post("/api/chats/:chatId/research-topic", requireAuth, async (req, res) => {
       console.error("Research topic error:", error)
       res.status(500).json({ success: false, error: "Failed to process research topic" })
     }
-  })
+  });
+  
 
   app.post("/api/chats/:chatId/clarification-answer", requireAuth, async (req, res) => {
     try {
@@ -606,7 +564,7 @@ app.post("/api/chats/:chatId/research-topic", requireAuth, async (req, res) => {
       console.error("Clarification answer error:", error)
       res.status(500).json({ success: false, error: "Failed to process clarification answer" })
     }
-  })
+  });
 
 
 
@@ -698,4 +656,4 @@ app.post("/api/chats/:chatId/send-email", requireAuth, async (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Server (JWT-only) is running on port ${PORT}`);
-});
+    });
