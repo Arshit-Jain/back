@@ -127,33 +127,35 @@ app.get(
 
 // Callback: Passport will set req.user if successful; we sign a JWT and redirect with token
 app.get(
-  "/auth/google/callback",
-  passport.authenticate("google", { session: false, failureRedirect: `${FRONTEND_URL}/login?error=oauth_failed` }),
-  (req, res) => {
-    try {
-      if (!req.user) {
-        return res.redirect(`${FRONTEND_URL}/login?error=no_user`);
+    "/auth/google/callback",
+    passport.authenticate("google", {
+      session: false,
+      failureRedirect: `${FRONTEND_URL}/login?error=oauth_failed`,
+    }),
+    (req, res) => {
+      try {
+        if (!req.user) {
+          return res.redirect(`${FRONTEND_URL}/login?error=no_user`);
+        }
+  
+        const user = req.user;
+        const tokenPayload = {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          is_premium: user.is_premium || false,
+        };
+  
+        const jwtToken = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "7d" });
+  
+        const redirectUrl = `${FRONTEND_URL}/login?token=${encodeURIComponent(jwtToken)}&oauth=success`;
+        console.log("=== OAuth success, redirecting with JWT ===", redirectUrl);
+        return res.redirect(redirectUrl);
+      } catch (err) {
+        console.error("OAuth callback handler error:", err);
+        return res.redirect(`${FRONTEND_URL}/login?error=server_error`);
       }
-
-      const user = req.user;
-      const tokenPayload = {
-        id: user.id,
-        username: user.username,
-        email: user.email,
-        is_premium: user.is_premium || false,
-      };
-
-      const jwtToken = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "7d" });
-
-      // Redirect to frontend with token in query param (frontend should grab & store securely)
-      const redirectUrl = `${FRONTEND_URL}/login?token=${encodeURIComponent(jwtToken)}&oauth=success`;
-      console.log("=== OAuth success, redirecting with JWT ===", redirectUrl);
-      return res.redirect(redirectUrl);
-    } catch (err) {
-      console.error("OAuth callback handler error:", err);
-      return res.redirect(`${FRONTEND_URL}/login?error=server_error`);
     }
-  }
 );
 
 // Optional: endpoint to exchange temporary tokens (if your frontend sends base64 token flow)
