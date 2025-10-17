@@ -47,27 +47,28 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ✅ Session configuration
+// Session configuration
 app.use(
-  session({
-    store: new PgSession({
-      pool,
-      tableName: "session",
-      createTableIfMissing: true,
-    }),
-    secret: process.env.SESSION_SECRET || "your-secret-key-change-in-production",
-    resave: false,
-    saveUninitialized: false,
-    name: "sessionId",
-    proxy: true,
-    cookie: {
-      secure: process.env.NODE_ENV === "production", // HTTPS only in production
-      httpOnly: true,
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    },
-  })
-);
+    session({
+      store: new PgSession({
+        pool,
+        tableName: "session",
+        createTableIfMissing: true,
+      }),
+      secret: process.env.SESSION_SECRET || "your-secret-key-change-in-production",
+      resave: false,
+      saveUninitialized: false,
+      name: "sessionId",
+      proxy: true,
+      cookie: {
+        secure: process.env.NODE_ENV === "production", // HTTPS only in production
+        httpOnly: true,
+        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        domain: process.env.NODE_ENV === "production" ? undefined : undefined, // Let browser handle it
+      },
+    })
+  );
 
 // ✅ Initialize Passport (AFTER session)
 app.use(passport.initialize());
@@ -181,18 +182,14 @@ app.get("/auth/google/callback",
         console.log('=== Google OAuth Callback Started ===');
         console.log('Query params:', req.query);
         console.log('Session ID:', req.sessionID);
-        console.log('Session data before auth:', JSON.stringify(req.session, null, 2));
-        console.log('Headers:', JSON.stringify(req.headers, null, 2));
         
         passport.authenticate("google", (err, user, info) => {
             console.log('=== Passport Authenticate Callback ===');
             console.log('Error:', err);
             console.log('User:', user ? { id: user.id, email: user.email, username: user.username } : null);
-            console.log('Info:', info);
             
             if (err) {
                 console.error('Authentication error:', err);
-                console.error('Error stack:', err.stack);
                 return res.redirect(`${FRONTEND_URL}/login?error=oauth_failed&message=${encodeURIComponent(err.message)}`);
             }
             
@@ -201,55 +198,41 @@ app.get("/auth/google/callback",
                 return res.redirect(`${FRONTEND_URL}/login?error=no_user`);
             }
             
-            console.log('About to call req.logIn...');
-            
             // Manually establish login session
             req.logIn(user, (loginErr) => {
                 if (loginErr) {
                     console.error('Login error:', loginErr);
-                    console.error('Login error stack:', loginErr.stack);
                     return res.redirect(`${FRONTEND_URL}/login?error=login_failed&message=${encodeURIComponent(loginErr.message)}`);
                 }
                 
                 console.log('=== User Logged In Successfully ===');
-                console.log('Session after login:', JSON.stringify(req.session, null, 2));
-                console.log('User from req:', req.user);
-                console.log('isAuthenticated:', req.isAuthenticated());
                 
                 // Set additional session data
                 req.session.userId = user.id;
                 req.session.username = user.username;
                 
-                console.log('About to save session...');
-                
                 // Explicitly save session before redirect
                 req.session.save((saveErr) => {
                     if (saveErr) {
                         console.error('Session save error:', saveErr);
-                        console.error('Session save error stack:', saveErr.stack);
-                        return res.redirect(`${FRONTEND_URL}/login?error=session_failed&message=${encodeURIComponent(saveErr.message)}`);
+                        return res.redirect(`${FRONTEND_URL}/login?error=session_failed`);
                     }
                     
                     console.log('=== Session Saved Successfully ===');
-                    console.log('Final session data:', JSON.stringify({
-                        id: req.sessionID,
+                    console.log('Session ID:', req.sessionID);
+                    console.log('Session data:', {
                         userId: req.session.userId,
                         username: req.session.username,
-                        passport: req.session.passport,
                         cookie: req.session.cookie
-                    }, null, 2));
+                    });
                     
-                    // Redirect to frontend
-                    console.log('Redirecting to:', FRONTEND_URL);
-                    console.log('Response headers about to be sent:', res.getHeaders());
-                    
-                    res.redirect(FRONTEND_URL);
+                    // Add a special query parameter to help frontend detect OAuth success
+                    res.redirect(`${FRONTEND_URL}/login?oauth=success`);
                 });
             });
         })(req, res, next);
     }
 );
-
 // Add a test endpoint to check session status
 app.get("/auth/session", (req, res) => {
     console.log('=== Session Check ===');
