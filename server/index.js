@@ -450,139 +450,165 @@ app.get("/api/chats/:chatId", requireAuth, async (req, res) => {
   }
 });
 
-app.get("/api/chats/:chatId/messages", requireAuth, async (req, res) => {
-  try {
-    const { chatId } = req.params;
-    const userId = req.user.id;
-    const chat = await chatQueries.findById(chatId);
-    if (!chat || chat.user_id !== userId) {
-      return res.status(404).json({ success: false, error: "Chat not found" });
+app.post("/api/chats/:chatId/messages", requireAuth, async (req, res) => {
+    try {
+      const { chatId } = req.params
+      const { message, messageType = "regular" } = req.body
+      const userId = req.user.id
+      
+      const chat = await chatQueries.findById(chatId)
+      if (!chat || chat.user_id !== userId) {
+        return res.status(404).json({ success: false, error: "Chat not found" })
+      }
+      
+      await messageQueries.create(chatId, message, true)
+      const result = await OpenAIService.generateTitleAndQuestions(message)
+      
+      if (result.success) {
+        const generatedTitle = result.title
+        const questions = result.questions
+        await chatQueries.updateTitle(chatId, generatedTitle)
+        
+        const responseText = `I'd like to help you refine your research topic. To provide you with the most relevant research guidance, I have a few clarifying questions:\n\n${questions.map((q, i) => `${i + 1}. ${q}`).join("\n\n")}`
+        
+        await messageQueries.create(chatId, responseText, false)
+        
+        res.json({ 
+          success: true, 
+          response: responseText, 
+          messageType: "clarifying_questions", 
+          questions, 
+          title: generatedTitle
+        })
+      } else {
+        const errorResponse = "I'm not able to find the answer right now. Please try again."
+        await messageQueries.create(chatId, errorResponse, false)
+        await chatQueries.markAsError(chatId)
+        res.json({ success: true, response: errorResponse, title: "Research Topic..." })
+      }
+    } catch (error) {
+      console.error("Legacy message error:", error)
+      res.status(500).json({ success: false, error: "Failed to send message" })
     }
-    const messages = await messageQueries.findByChatId(chatId);
-    res.json({ success: true, messages });
-  } catch (error) {
-    console.error("Get messages error:", error);
-    res.status(500).json({ success: false, error: "Failed to fetch messages" });
-  }
-});
+  })
 
 // --------------------
 // Research flows (unchanged except auth uses req.user.id)
 // --------------------
 app.post("/api/chats/:chatId/research-topic", requireAuth, async (req, res) => {
-  try {
-    const { chatId } = req.params;
-    const { message } = req.body;
-    const userId = req.user.id;
-    const chat = await chatQueries.findById(chatId);
-    if (!chat || chat.user_id !== userId) {
-      return res.status(404).json({ success: false, error: "Chat not found" });
-    }
-    if (chat.is_completed || chat.has_error) {
-      return res.status(400).json({ success: false, error: "This chat is completed or has an error. Please start a new chat." });
-    }
-
-    await messageQueries.create(chatId, message, true);
-    const result = await OpenAIService.generateTitleAndQuestions(message);
-    if (result.success) {
-      const generatedTitle = result.title;
-      const questions = result.questions;
-      await chatQueries.updateTitle(chatId, generatedTitle);
-      const responseText = `I'd like to help you refine your research topic. To provide you with the most relevant research guidance, I have a few clarifying questions:\n\n${questions.map((q, i) => `${i + 1}. ${q}`).join("\n\n")}\n\nPlease answer these questions one by one, and I'll create a comprehensive research plan for you.`;
-      await messageQueries.create(chatId, responseText, false);
-      res.json({ success: true, response: responseText, messageType: "clarifying_questions", questions, title: generatedTitle, user: user.username });
-    } else {
-      const errorResponse = "I'm not able to find the answer right now. Please try again.";
-      await messageQueries.create(chatId, errorResponse, false);
-      await chatQueries.markAsError(chatId);
-      res.json({ success: true, response: errorResponse, title: "Research Topic...", user: user.username });
-    }
-  } catch (error) {
-    console.error("Research topic error:", error);
-    res.status(500).json({ success: false, error: "Failed to process research topic" });
-  }
-});
-
-app.post("/api/chats/:chatId/clarification-answer", requireAuth, async (req, res) => {
-  try {
-    const { chatId } = req.params;
-    const { message, questionIndex, totalQuestions, originalTopic, questions, answers } = req.body;
-    const userId = req.user.id;
-    const chat = await chatQueries.findById(chatId);
-    if (!chat || chat.user_id !== userId) {
-      return res.status(404).json({ success: false, error: "Chat not found" });
-    }
-    if (chat.is_completed || chat.has_error) {
-      return res.status(400).json({ success: false, error: "This chat is completed or has an error. Please start a new chat." });
-    }
-    await messageQueries.create(chatId, message, true);
-
-    if (questionIndex >= totalQuestions - 1) {
-      let researchResult = { success: false };
-      let geminiResult = { success: false };
-      try {
-        [researchResult, geminiResult] = await Promise.all([
-          OpenAIService.generateResearchPage(originalTopic, questions, answers),
-          GeminiService.generateResearchPage(originalTopic, questions, answers).catch(() => ({ success: false })),
-        ]);
-      } catch (e) {}
-
-      if (researchResult.success) {
-        const openaiLabeled = `## ChatGPT (OpenAI) Research\n\n${researchResult.researchPage}`;
-        const geminiLabeled = geminiResult && geminiResult.success && geminiResult.researchPage
-          ? `## Gemini (Google) Research\n\n${geminiResult.researchPage}`
-          : null;
-        await messageQueries.create(chatId, openaiLabeled, false);
-        if (geminiLabeled) await messageQueries.create(chatId, geminiLabeled, false);
-        await chatQueries.markAsCompleted(chatId);
-        res.json({ success: true, messageType: "research_pages", openaiResearch: openaiLabeled, geminiResearch: geminiLabeled, user: user.username });
-      } else {
-        const errorResponse = "I'm not able to find the answer right now. Please try again.";
-        await messageQueries.create(chatId, errorResponse, false);
-        await chatQueries.markAsError(chatId);
-        res.json({ success: true, response: errorResponse, user: user.username });
+    try {
+      const { chatId } = req.params
+      const { message } = req.body
+      const userId = req.user.id
+      
+      const chat = await chatQueries.findById(chatId)
+      if (!chat || chat.user_id !== userId) {
+        return res.status(404).json({ success: false, error: "Chat not found" })
       }
-    } else {
-      const responseText = `Thank you for your answer. Please answer the next question.`;
-      await messageQueries.create(chatId, responseText, false);
-      res.json({ success: true, response: responseText, messageType: "acknowledgment", user: user.username });
+      if (chat.is_completed || chat.has_error) {
+        return res.status(400).json({ success: false, error: "This chat is completed or has an error. Please start a new chat." })
+      }
+  
+      await messageQueries.create(chatId, message, true)
+      const result = await OpenAIService.generateTitleAndQuestions(message)
+      
+      if (result.success) {
+        const generatedTitle = result.title
+        const questions = result.questions
+        await chatQueries.updateTitle(chatId, generatedTitle)
+        
+        const responseText = `I'd like to help you refine your research topic. To provide you with the most relevant research guidance, I have a few clarifying questions:\n\n${questions.map((q, i) => `${i + 1}. ${q}`).join("\n\n")}\n\nPlease answer these questions one by one, and I'll create a comprehensive research plan for you.`
+        
+        await messageQueries.create(chatId, responseText, false)
+        
+        res.json({ 
+          success: true, 
+          response: responseText, 
+          messageType: "clarifying_questions", 
+          questions, 
+          title: generatedTitle
+        })
+      } else {
+        const errorResponse = "I'm not able to find the answer right now. Please try again."
+        await messageQueries.create(chatId, errorResponse, false)
+        await chatQueries.markAsError(chatId)
+        res.json({ success: true, response: errorResponse, title: "Research Topic..." })
+      }
+    } catch (error) {
+      console.error("Research topic error:", error)
+      res.status(500).json({ success: false, error: "Failed to process research topic" })
     }
-  } catch (error) {
-    console.error("Clarification answer error:", error);
-    res.status(500).json({ success: false, error: "Failed to process clarification answer" });
-  }
-});
+  })
 
-// Legacy message endpoint (updated to use req.user)
-app.post("/api/chats/:chatId/messages", requireAuth, async (req, res) => {
-  try {
-    const { chatId } = req.params;
-    const { message, messageType = "regular" } = req.body;
-    const userId = req.user.id;
-    const chat = await chatQueries.findById(chatId);
-    if (!chat || chat.user_id !== userId) {
-      return res.status(404).json({ success: false, error: "Chat not found" });
+  app.post("/api/chats/:chatId/clarification-answer", requireAuth, async (req, res) => {
+    try {
+      const { chatId } = req.params
+      const { message, questionIndex, totalQuestions, originalTopic, questions, answers } = req.body
+      const userId = req.user.id
+      
+      const chat = await chatQueries.findById(chatId)
+      if (!chat || chat.user_id !== userId) {
+        return res.status(404).json({ success: false, error: "Chat not found" })
+      }
+      if (chat.is_completed || chat.has_error) {
+        return res.status(400).json({ success: false, error: "This chat is completed or has an error. Please start a new chat." })
+      }
+      
+      await messageQueries.create(chatId, message, true)
+  
+      if (questionIndex >= totalQuestions - 1) {
+        // All questions answered - generate research
+        let researchResult = { success: false }
+        let geminiResult = { success: false }
+        
+        try {
+          [researchResult, geminiResult] = await Promise.all([
+            OpenAIService.generateResearchPage(originalTopic, questions, answers),
+            GeminiService.generateResearchPage(originalTopic, questions, answers).catch(() => ({ success: false }))
+          ])
+        } catch (e) {
+          console.error("Error generating research:", e)
+        }
+  
+        if (researchResult.success) {
+          const openaiLabeled = `## ChatGPT (OpenAI) Research\n\n${researchResult.researchPage}`
+          const geminiLabeled = geminiResult?.success && geminiResult.researchPage
+            ? `## Gemini (Google) Research\n\n${geminiResult.researchPage}`
+            : null
+          
+          await messageQueries.create(chatId, openaiLabeled, false)
+          if (geminiLabeled) await messageQueries.create(chatId, geminiLabeled, false)
+          await chatQueries.markAsCompleted(chatId)
+          
+          res.json({ 
+            success: true, 
+            messageType: "research_pages", 
+            openaiResearch: openaiLabeled, 
+            geminiResearch: geminiLabeled 
+          })
+        } else {
+          const errorResponse = "I'm not able to find the answer right now. Please try again."
+          await messageQueries.create(chatId, errorResponse, false)
+          await chatQueries.markAsError(chatId)
+          res.json({ success: true, response: errorResponse })
+        }
+      } else {
+        // More questions to answer
+        const responseText = `Thank you for your answer. Please answer the next question.`
+        await messageQueries.create(chatId, responseText, false)
+        res.json({ 
+          success: true, 
+          response: responseText, 
+          messageType: "acknowledgment" 
+        })
+      }
+    } catch (error) {
+      console.error("Clarification answer error:", error)
+      res.status(500).json({ success: false, error: "Failed to process clarification answer" })
     }
-    await messageQueries.create(chatId, message, true);
-    const result = await OpenAIService.generateTitleAndQuestions(message);
-    if (result.success) {
-      const generatedTitle = result.title;
-      const questions = result.questions;
-      await chatQueries.updateTitle(chatId, generatedTitle);
-      const responseText = `I'd like to help you refine your research topic. To provide you with the most relevant research guidance, I have a few clarifying questions:\n\n${questions.map((q, i) => `${i + 1}. ${q}`).join("\n\n")}`;
-      await messageQueries.create(chatId, responseText, false);
-      res.json({ success: true, response: responseText, messageType: "clarifying_questions", questions, title: generatedTitle, user: user.username });
-    } else {
-      const errorResponse = "I'm not able to find the answer right now. Please try again.";
-      await messageQueries.create(chatId, errorResponse, false);
-      await chatQueries.markAsError(chatId);
-      res.json({ success: true, response: errorResponse, title: "Research Topic...", user: user.username });
-    }
-  } catch (error) {
-    console.error("Legacy message error:", error);
-    res.status(500).json({ success: false, error: "Failed to send message" });
-  }
-});
+  })
+
+
 
 // --------------------
 // User limits (chat count) - uses req.user.id
