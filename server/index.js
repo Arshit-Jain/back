@@ -49,106 +49,167 @@ app.use(express.urlencoded({ extended: true }));
 // --------------------
 // Passport (Google) - NO SESSIONS
 // --------------------
+// ===== REPLACE THE ENTIRE GOOGLE OAUTH SECTION WITH THIS =====
+// Find and replace from "// --------------------" to "app.post("/api/auth/oauth-complete"..."
+
+// --------------------
+// Passport (Google) - NO SESSIONS
+// --------------------
 passport.use(
-  new GoogleStrategy.Strategy(
-    {
-      clientID: process.env.GOOGLE_CLIENT_ID,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL: `${BACKEND_URL}/auth/google/callback`,
-      proxy: true,
-    },
-    async (accessToken, refreshToken, profile, done) => {
+    new GoogleStrategy.Strategy(
+      {
+        clientID: process.env.GOOGLE_CLIENT_ID,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+        callbackURL: `${BACKEND_URL}/auth/google/callback`,
+        proxy: true,
+      },
+      async (accessToken, refreshToken, profile, done) => {
+        try {
+          console.log("=== Google Strategy Called ===");
+          console.log("Profile ID:", profile.id);
+          if (!profile.emails || !profile.emails[0]) {
+            console.error("No email in Google profile");
+            return done(new Error("No email provided by Google"));
+          }
+  
+          const email = profile.emails[0].value.toLowerCase();
+          let user = await userQueries.findByEmail(email);
+  
+          if (!user) {
+            const toBaseUsername = (name) => {
+              const raw = (name || "").toString().toLowerCase();
+              const sanitized = raw
+                .replace(/\s+/g, "_")
+                .replace(/[^a-z0-9_]/g, "")
+                .replace(/_+/g, "_")
+                .replace(/^_+|_+$/g, "")
+                .slice(0, 20);
+              return sanitized || `user_${(profile.id || "").toString().slice(0, 6)}`;
+            };
+  
+            const generateUniqueUsername = async (base) => {
+              for (let i = 0; i < 10; i++) {
+                const suffix = Math.random().toString().slice(2, 8);
+                const candidate = `${base}_${suffix}`;
+                const exists = await userQueries.findByUsername(candidate);
+                if (!exists) return candidate;
+              }
+              return `${base}_${Date.now().toString().slice(-6)}`;
+            };
+  
+            const baseFromDisplay = profile.displayName;
+            const baseFromEmail = email.split("@")[0];
+            const base = toBaseUsername(baseFromDisplay || baseFromEmail || profile.id);
+            const uniqueUsername = await generateUniqueUsername(base);
+  
+            user = await userQueries.create(uniqueUsername, email, "google-oauth", false);
+            console.log("User created successfully:", user.id);
+          } else {
+            console.log("User already exists:", user.id);
+          }
+  
+          done(null, user);
+        } catch (err) {
+          console.error("Google Strategy error:", err);
+          done(err);
+        }
+      }
+    )
+  );
+  
+  // --------------------
+  // Auth routes (Google OAuth) - issue JWT on success
+  // --------------------
+  
+  // Initiate Google OAuth
+  app.get(
+    "/auth/google",
+    passport.authenticate("google", { scope: ["profile", "email"], session: false })
+  );
+  
+  // Callback: Passport will set req.user if successful; we sign a JWT and redirect with token
+  app.get(
+    "/auth/google/callback",
+    passport.authenticate("google", {
+      session: false,
+      failureRedirect: `${FRONTEND_URL}/login?error=oauth_failed`,
+    }),
+    (req, res) => {
       try {
-        console.log("=== Google Strategy Called ===");
-        console.log("Profile ID:", profile.id);
-        if (!profile.emails || !profile.emails[0]) {
-          console.error("No email in Google profile");
-          return done(new Error("No email provided by Google"));
+        if (!req.user) {
+          console.error("=== OAuth Callback: No user in req ===");
+          return res.redirect(`${FRONTEND_URL}/login?error=no_user`);
         }
-
-        const email = profile.emails[0].value.toLowerCase();
-        let user = await userQueries.findByEmail(email);
-
-        if (!user) {
-          // create username from displayName or email local-part
-          const toBaseUsername = (name) => {
-            const raw = (name || "").toString().toLowerCase();
-            const sanitized = raw
-              .replace(/\s+/g, "_")
-              .replace(/[^a-z0-9_]/g, "")
-              .replace(/_+/g, "_")
-              .replace(/^_+|_+$/g, "")
-              .slice(0, 20);
-            return sanitized || `user_${(profile.id || "").toString().slice(0, 6)}`;
-          };
-
-          const generateUniqueUsername = async (base) => {
-            for (let i = 0; i < 10; i++) {
-              const suffix = Math.random().toString().slice(2, 8);
-              const candidate = `${base}_${suffix}`;
-              const exists = await userQueries.findByUsername(candidate);
-              if (!exists) return candidate;
-            }
-            return `${base}_${Date.now().toString().slice(-6)}`;
-          };
-
-          const baseFromDisplay = profile.displayName;
-          const baseFromEmail = email.split("@")[0];
-          const base = toBaseUsername(baseFromDisplay || baseFromEmail || profile.id);
-          const uniqueUsername = await generateUniqueUsername(base);
-
-          user = await userQueries.create(uniqueUsername, email, "google-oauth", false);
-          console.log("User created successfully:", user.id);
-        } else {
-          console.log("User already exists:", user.id);
-        }
-
-        // Do NOT serialize into a session; just return the user
-        done(null, user);
+  
+        const user = req.user;
+        console.log("=== OAuth Callback: User authenticated ===", { userId: user.id, username: user.username });
+        
+        const tokenPayload = {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          is_premium: user.is_premium || false,
+        };
+  
+        const jwtToken = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "7d" });
+  
+        const redirectUrl = `${FRONTEND_URL}/login?token=${encodeURIComponent(jwtToken)}&oauth=success`;
+        console.log("=== OAuth success, redirecting ===", { redirectUrl: redirectUrl.substring(0, 100) + "..." });
+        
+        return res.redirect(redirectUrl);
       } catch (err) {
-        console.error("Google Strategy error:", err);
-        done(err);
+        console.error("OAuth callback handler error:", err);
+        return res.redirect(`${FRONTEND_URL}/login?error=server_error`);
       }
     }
-  )
-);
-
-// We do not use passport.serializeUser / deserializeUser because we don't use sessions
-
-// --------------------
-// Auth routes (Google OAuth) - issue JWT on success
-// --------------------
-
-// Initiate Google OAuth
-app.get(
-  "/auth/google",
-  passport.authenticate("google", { scope: ["profile", "email"], session: false })
-);
-
-// Callback: Passport will set req.user if successful; we sign a JWT and redirect with token
-app.post("/api/auth/oauth-complete", async (req, res) => {
+  );
+  
+  // OAuth complete endpoint - exchange token for validated JWT (optional, for extra security)
+  app.post("/api/auth/oauth-complete", async (req, res) => {
     try {
       const { token } = req.body;
+  
       if (!token) {
+        console.error("=== OAuth Complete: No token provided ===");
         return res.status(400).json({ success: false, error: "No token provided" });
       }
-      
-      // Verify the JWT (it's already valid from the callback)
-      const decoded = jwt.verify(token, JWT_SECRET);
-      
+  
+      console.log("=== OAuth Complete: Verifying token ===");
+  
+      let decoded;
+      try {
+        decoded = jwt.verify(token, JWT_SECRET);
+        console.log("=== OAuth Complete: Token verified ===", { userId: decoded.id });
+      } catch (verifyError) {
+        console.error("=== OAuth Complete: Token verification failed ===", verifyError.message);
+        return res.status(401).json({ success: false, error: "Invalid or expired token" });
+      }
+  
+      const user = await userQueries.findById(decoded.id);
+  
+      if (!user) {
+        console.error("=== OAuth Complete: User not found ===", { userId: decoded.id });
+        return res.status(404).json({ success: false, error: "User not found" });
+      }
+  
+      console.log("=== OAuth Complete: User verified ===", { userId: user.id });
+  
       return res.json({
         success: true,
-        token,
+        token, // Return the same token since it's already valid
         user: {
-          id: decoded.id,
-          username: decoded.username,
-          email: decoded.email,
-          is_premium: decoded.is_premium
-        }
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          is_premium: user.is_premium || false,
+        },
       });
     } catch (error) {
-      console.error("OAuth complete error:", error);
-      res.status(401).json({ success: false, error: "Invalid token" });
+      console.error("=== OAuth Complete: Unexpected error ===", error.message);
+      return res.status(500).json({
+        success: false,
+        error: "Internal server error",
+      });
     }
   });
 
