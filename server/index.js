@@ -198,6 +198,8 @@ app.get("/auth/google/callback",
                 return res.redirect(`${FRONTEND_URL}/login?error=no_user`);
             }
             
+            console.log('=== About to log in user ===');
+            
             // Manually establish login session
             req.logIn(user, (loginErr) => {
                 if (loginErr) {
@@ -211,28 +213,129 @@ app.get("/auth/google/callback",
                 req.session.userId = user.id;
                 req.session.username = user.username;
                 
-                // Explicitly save session before redirect
+                console.log('=== About to save session ===');
+                
+                // Explicitly save session before creating token
                 req.session.save((saveErr) => {
                     if (saveErr) {
                         console.error('Session save error:', saveErr);
-                        return res.redirect(`${FRONTEND_URL}/login?error=session_failed`);
+                        return res.redirect(`${FRONTEND_URL}/login?error=session_failed&message=${encodeURIComponent(saveErr.message)}`);
                     }
                     
                     console.log('=== Session Saved Successfully ===');
-                    console.log('Session ID:', req.sessionID);
                     console.log('Session data:', {
                         userId: req.session.userId,
                         username: req.session.username,
-                        cookie: req.session.cookie
+                        sessionID: req.sessionID
                     });
                     
-                    // Add a special query parameter to help frontend detect OAuth success
-                    res.redirect(`${FRONTEND_URL}/login?oauth=success`);
+                    // ✅ CREATE THE TOKEN HERE
+                    const tokenData = {
+                        userId: user.id,
+                        username: user.username,
+                        email: user.email,
+                        is_premium: user.is_premium,
+                        timestamp: Date.now()
+                    };
+                    
+                    console.log('=== Creating token with data ===', tokenData);
+                    
+                    const tempToken = Buffer.from(JSON.stringify(tokenData)).toString('base64');
+                    
+                    console.log('=== Token created ===', tempToken.substring(0, 20) + '...');
+                    
+                    // ✅ REDIRECT WITH TOKEN
+                    const redirectUrl = `${FRONTEND_URL}/login?token=${tempToken}&oauth=success`;
+                    console.log('=== Redirecting to ===', redirectUrl);
+                    
+                    res.redirect(redirectUrl);
                 });
             });
         })(req, res, next);
     }
 );
+
+// Add endpoint to exchange token for session
+app.post("/api/auth/oauth-complete", async (req, res) => {
+    try {
+        console.log('=== OAuth Complete Endpoint Called ===');
+        console.log('Request body:', req.body);
+        
+        const { token } = req.body;
+        
+        if (!token) {
+            console.error('No token provided');
+            return res.status(400).json({ success: false, error: 'Token required' });
+        }
+        
+        console.log('=== Decoding token ===');
+        
+        // Decode token
+        const decoded = JSON.parse(Buffer.from(token, 'base64').toString());
+        console.log('=== Decoded token data ===', decoded);
+        
+        // Verify token is recent (within 2 minutes)
+        if (Date.now() - decoded.timestamp > 120000) {
+            console.error('Token expired');
+            return res.status(400).json({ success: false, error: 'Token expired' });
+        }
+        
+        // Get user
+        const user = await userQueries.findById(decoded.userId);
+        
+        if (!user) {
+            console.error('User not found:', decoded.userId);
+            return res.status(400).json({ success: false, error: 'User not found' });
+        }
+        
+        console.log('=== User found, establishing session ===', {
+            id: user.id,
+            username: user.username,
+            email: user.email
+        });
+        
+        // Establish session
+        req.session.userId = user.id;
+        req.session.username = user.username;
+        
+        // Login user with passport
+        req.logIn(user, (loginErr) => {
+            if (loginErr) {
+                console.error('Login error:', loginErr);
+                return res.status(500).json({ success: false, error: 'Login failed' });
+            }
+            
+            req.session.save((err) => {
+                if (err) {
+                    console.error('Session save error:', err);
+                    return res.status(500).json({ success: false, error: 'Session creation failed' });
+                }
+                
+                console.log('=== Session established successfully ===');
+                console.log('Session ID:', req.sessionID);
+                console.log('Session data:', {
+                    userId: req.session.userId,
+                    username: req.session.username
+                });
+                
+                res.json({ 
+                    success: true, 
+                    user: { 
+                        id: user.id, 
+                        username: user.username, 
+                        email: user.email, 
+                        is_premium: user.is_premium 
+                    } 
+                });
+            });
+        });
+        
+    } catch (error) {
+        console.error('OAuth complete error:', error);
+        res.status(500).json({ success: false, error: 'Internal server error', details: error.message });
+    }
+});
+
 // Add a test endpoint to check session status
 app.get("/auth/session", (req, res) => {
     console.log('=== Session Check ===');
