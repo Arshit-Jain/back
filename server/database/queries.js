@@ -79,6 +79,15 @@ export const chatQueries = {
 
   async delete(chatId) {
     await pool.query('DELETE FROM chats WHERE id = $1', [chatId])
+  },
+
+  // ✅ ADD THIS FUNCTION ↓↓↓
+  async countByUserId(userId) {
+    const result = await pool.query(
+      'SELECT COUNT(*) FROM chats WHERE user_id = $1',
+      [userId]
+    )
+    return parseInt(result.rows[0].count, 10)
   }
 }
 
