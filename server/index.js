@@ -1,13 +1,12 @@
+// server/index.js
 import express from "express";
 import cors from "cors";
-import session from "express-session";
-import connectPgSimple from "connect-pg-simple";
 import bcrypt from "bcryptjs";
 import dotenv from "dotenv";
 import passport from "passport";
 import GoogleStrategy from "passport-google-oauth20";
 import pool from "./database/connection.js";
-import jwt from 'jsonwebtoken';
+import jwt from "jsonwebtoken";
 
 import {
   userQueries,
@@ -24,27 +23,21 @@ dotenv.config();
 
 const app = express();
 
+const JWT_SECRET = process.env.JWT_SECRET || "your-jwt-secret-change-in-production";
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-jwt-secret-change-in-production';
-
-// ✅ Initialize Postgres session store
-const PgSession = connectPgSimple(session);
-
-// ✅ Ensure proxy trust for correct cookie handling behind Render/Vercel
-app.set("trust proxy", 1);
-
-// ✅ Normalize URLs to prevent trailing slash mismatches
+// Normalize URLs helper
 const normalizeUrl = (url) => (url || "").replace(/\/+$/, "");
 const FRONTEND_URL = normalizeUrl(process.env.FRONTEND_URL || "http://localhost:5173");
 const BACKEND_URL = normalizeUrl(process.env.BACKEND_URL || "http://localhost:3000");
 
+// Trust proxy for proper redirect/origin detection behind Render/Vercel
+app.set("trust proxy", 1);
 
-
-// ✅ CORS must be configured BEFORE session middleware
+// CORS (no sessions/cookies required)
 app.use(
   cors({
     origin: FRONTEND_URL,
-    credentials: true, // Required to send cookies
+    credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
@@ -53,910 +46,573 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use(
-    session({
-      store: new PgSession({
-        pool,
-        tableName: "session",
-        createTableIfMissing: true,
-      }),
-      secret: process.env.SESSION_SECRET || "your-secret-key-change-in-production",
-      resave: false,
-      saveUninitialized: false,
-      name: "sessionId",
+// --------------------
+// Passport (Google) - NO SESSIONS
+// --------------------
+passport.use(
+  new GoogleStrategy.Strategy(
+    {
+      clientID: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      callbackURL: `${BACKEND_URL}/auth/google/callback`,
       proxy: true,
-      cookie: {
-        secure: process.env.NODE_ENV === "production", // HTTPS only in production
-        httpOnly: true,
-        sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-        maxAge: 24 * 60 * 60 * 1000, // 24 hours
-        path: '/',
-        domain: process.env.NODE_ENV === "production" ? undefined : undefined, // Let browser determine
-      },
-    })
-  );
-
-// ✅ Initialize Passport (AFTER session)
-app.use(passport.initialize());
-app.use(passport.session());
-
-
-
-// Test endpoint to verify server is running
-app.get("/test", (req, res) => {
-    console.log('=== TEST ENDPOINT HIT ===');
-    res.json({ message: "Server is working", timestamp: new Date().toISOString() });
-});
-
-passport.serializeUser((user, done) => {
-    console.log('Serializing user:', user.id);
-    done(null, user.id);
-});
-
-passport.deserializeUser(async (id, done) => {
-    try {
-        console.log('Deserializing user:', id);
-        const user = await userQueries.findById(id);
-        if (!user) {
-            console.log('User not found during deserialization:', id);
-            return done(null, false);
-        }
-        console.log('User deserialized successfully:', user.id);
-        done(null, user);
-    } catch (e) {
-        console.error('Deserialization error:', e);
-        done(e);
-    }
-});
-
-passport.use(new GoogleStrategy.Strategy({
-    clientID: process.env.GOOGLE_CLIENT_ID,
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: `${BACKEND_URL}/auth/google/callback`,
-    proxy: true
-}, async (accessToken, refreshToken, profile, done) => {
-    try {
-        console.log('=== Google Strategy Called ===');
-        console.log('Profile ID:', profile.id);
-        console.log('Profile emails:', profile.emails);
-        console.log('Profile displayName:', profile.displayName);
-        
+    },
+    async (accessToken, refreshToken, profile, done) => {
+      try {
+        console.log("=== Google Strategy Called ===");
+        console.log("Profile ID:", profile.id);
         if (!profile.emails || !profile.emails[0]) {
-            console.error('No email in Google profile');
-            return done(new Error('No email provided by Google'));
+          console.error("No email in Google profile");
+          return done(new Error("No email provided by Google"));
         }
-        
-        const email = profile.emails[0].value;
-        console.log('Processing email:', email);
-        
+
+        const email = profile.emails[0].value.toLowerCase();
         let user = await userQueries.findByEmail(email);
-        console.log('Existing user found:', !!user);
-        
+
         if (!user) {
-            console.log('Creating new user for email:', email);
-            
-            const toBaseUsername = (name) => {
-                const raw = (name || '').toString().toLowerCase();
-                const sanitized = raw
-                    .replace(/\s+/g, '_')
-                    .replace(/[^a-z0-9_]/g, '')
-                    .replace(/_+/g, '_')
-                    .replace(/^_+|_+$/g, '')
-                    .slice(0, 20);
-                return sanitized || `user_${(profile.id || '').toString().slice(0, 6)}`;
-            };
-            
-            const generateUniqueUsername = async (base) => {
-                for (let i = 0; i < 10; i++) {
-                    const suffix = Math.random().toString().slice(2, 8);
-                    const candidate = `${base}_${suffix}`;
-                    const exists = await userQueries.findByUsername(candidate);
-                    if (!exists) return candidate;
-                }
-                return `${base}_${Date.now().toString().slice(-6)}`;
-            };
-            
-            const baseFromDisplay = profile.displayName;
-            const baseFromEmail = email.split('@')[0];
-            const base = toBaseUsername(baseFromDisplay || baseFromEmail || profile.id);
-            const uniqueUsername = await generateUniqueUsername(base);
-            
-            console.log('Generated username:', uniqueUsername);
-            
-            user = await userQueries.create(uniqueUsername, email, "google-oauth", false);
-            console.log('User created successfully:', user.id);
+          // create username from displayName or email local-part
+          const toBaseUsername = (name) => {
+            const raw = (name || "").toString().toLowerCase();
+            const sanitized = raw
+              .replace(/\s+/g, "_")
+              .replace(/[^a-z0-9_]/g, "")
+              .replace(/_+/g, "_")
+              .replace(/^_+|_+$/g, "")
+              .slice(0, 20);
+            return sanitized || `user_${(profile.id || "").toString().slice(0, 6)}`;
+          };
+
+          const generateUniqueUsername = async (base) => {
+            for (let i = 0; i < 10; i++) {
+              const suffix = Math.random().toString().slice(2, 8);
+              const candidate = `${base}_${suffix}`;
+              const exists = await userQueries.findByUsername(candidate);
+              if (!exists) return candidate;
+            }
+            return `${base}_${Date.now().toString().slice(-6)}`;
+          };
+
+          const baseFromDisplay = profile.displayName;
+          const baseFromEmail = email.split("@")[0];
+          const base = toBaseUsername(baseFromDisplay || baseFromEmail || profile.id);
+          const uniqueUsername = await generateUniqueUsername(base);
+
+          user = await userQueries.create(uniqueUsername, email, "google-oauth", false);
+          console.log("User created successfully:", user.id);
         } else {
-            console.log('User already exists:', user.id);
+          console.log("User already exists:", user.id);
         }
-        
-        return done(null, user);
-    } catch (err) {
-        console.error('Google Strategy error:', err);
-        return done(err);
-    }
-}));
 
-// Auth endpoints
-app.get("/auth/google", (req, res, next) => {
-    console.log('=== Initiating Google OAuth ===');
-    console.log('Session ID:', req.sessionID);
-    console.log('BACKEND_URL:', BACKEND_URL);
-    console.log('Callback URL will be:', `${BACKEND_URL}/auth/google/callback`);
-    passport.authenticate("google", { scope: ["profile", "email"] })(req, res, next);
-});
-
-app.get("/auth/google/callback",
-    (req, res, next) => {
-        console.log('=== Google OAuth Callback Started ===');
-        console.log('Query params:', req.query);
-        console.log('Session ID:', req.sessionID);
-        
-        passport.authenticate("google", (err, user, info) => {
-            console.log('=== Passport Authenticate Callback ===');
-            console.log('Error:', err);
-            console.log('User:', user ? { id: user.id, email: user.email, username: user.username } : null);
-            
-            if (err) {
-                console.error('Authentication error:', err);
-                return res.redirect(`${FRONTEND_URL}/login?error=oauth_failed&message=${encodeURIComponent(err.message)}`);
-            }
-            
-            if (!user) {
-                console.error('No user returned from passport');
-                return res.redirect(`${FRONTEND_URL}/login?error=no_user`);
-            }
-            
-            console.log('=== About to log in user ===');
-            
-            // Manually establish login session
-            req.logIn(user, (loginErr) => {
-                if (loginErr) {
-                    console.error('Login error:', loginErr);
-                    return res.redirect(`${FRONTEND_URL}/login?error=login_failed&message=${encodeURIComponent(loginErr.message)}`);
-                }
-                
-                console.log('=== User Logged In Successfully ===');
-                
-                // Set additional session data
-                req.session.userId = user.id;
-                req.session.username = user.username;
-                
-                console.log('=== About to save session ===');
-                
-                // Explicitly save session before creating token
-                req.session.save((saveErr) => {
-                    if (saveErr) {
-                        console.error('Session save error:', saveErr);
-                        return res.redirect(`${FRONTEND_URL}/login?error=session_failed&message=${encodeURIComponent(saveErr.message)}`);
-                    }
-                    
-                    console.log('=== Session Saved Successfully ===');
-                    console.log('Session data:', {
-                        userId: req.session.userId,
-                        username: req.session.username,
-                        sessionID: req.sessionID
-                    });
-                    
-                    // ✅ CREATE THE TOKEN HERE
-                    const tokenData = {
-                        userId: user.id,
-                        username: user.username,
-                        email: user.email,
-                        is_premium: user.is_premium,
-                        timestamp: Date.now()
-                    };
-                    
-                    console.log('=== Creating token with data ===', tokenData);
-                    
-                    const tempToken = Buffer.from(JSON.stringify(tokenData)).toString('base64');
-                    
-                    console.log('=== Token created ===', tempToken.substring(0, 20) + '...');
-                    
-                    // ✅ REDIRECT WITH TOKEN
-                    const redirectUrl = `${FRONTEND_URL}/login?token=${tempToken}&oauth=success`;
-                    console.log('=== Redirecting to ===', redirectUrl);
-                    
-                    res.redirect(redirectUrl);
-                });
-            });
-        })(req, res, next);
+        // Do NOT serialize into a session; just return the user
+        done(null, user);
+      } catch (err) {
+        console.error("Google Strategy error:", err);
+        done(err);
+      }
     }
+  )
 );
 
+// We do not use passport.serializeUser / deserializeUser because we don't use sessions
+
+// --------------------
+// Auth routes (Google OAuth) - issue JWT on success
+// --------------------
+
+// Initiate Google OAuth
+app.get(
+  "/auth/google",
+  passport.authenticate("google", { scope: ["profile", "email"], session: false })
+);
+
+// Callback: Passport will set req.user if successful; we sign a JWT and redirect with token
+app.get(
+  "/auth/google/callback",
+  passport.authenticate("google", { session: false, failureRedirect: `${FRONTEND_URL}/login?error=oauth_failed` }),
+  (req, res) => {
+    try {
+      if (!req.user) {
+        return res.redirect(`${FRONTEND_URL}/login?error=no_user`);
+      }
+
+      const user = req.user;
+      const tokenPayload = {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        is_premium: user.is_premium || false,
+      };
+
+      const jwtToken = jwt.sign(tokenPayload, JWT_SECRET, { expiresIn: "7d" });
+
+      // Redirect to frontend with token in query param (frontend should grab & store securely)
+      const redirectUrl = `${FRONTEND_URL}/login?token=${encodeURIComponent(jwtToken)}&oauth=success`;
+      console.log("=== OAuth success, redirecting with JWT ===", redirectUrl);
+      return res.redirect(redirectUrl);
+    } catch (err) {
+      console.error("OAuth callback handler error:", err);
+      return res.redirect(`${FRONTEND_URL}/login?error=server_error`);
+    }
+  }
+);
+
+// Optional: endpoint to exchange temporary tokens (if your frontend sends base64 token flow)
+// If you don't use this flow, you can remove it. Keeping commented for reference.
+/*
 app.post("/api/auth/oauth-complete", async (req, res) => {
-    try {
-        console.log('=== OAuth Complete Endpoint Called ===');
-        
-        const { token } = req.body;
-        
-        if (!token) {
-            return res.status(400).json({ success: false, error: 'Token required' });
-        }
-        
-        // Decode token
-        let decoded;
-        try {
-            decoded = JSON.parse(Buffer.from(token, 'base64').toString());
-        } catch (decodeError) {
-            return res.status(400).json({ success: false, error: 'Invalid token format' });
-        }
-        
-        // Verify token is recent (within 2 minutes)
-        if (Date.now() - decoded.timestamp > 120000) {
-            return res.status(400).json({ success: false, error: 'Token expired' });
-        }
-        
-        // Get user
-        const user = await userQueries.findById(decoded.userId);
-        
-        if (!user) {
-            return res.status(400).json({ success: false, error: 'User not found' });
-        }
-        
-        console.log('=== User found, creating JWT ===');
-        
-        // Create JWT token
-        const jwtToken = jwt.sign(
-            { 
-                id: user.id, 
-                username: user.username,
-                email: user.email,
-                is_premium: user.is_premium
-            },
-            JWT_SECRET,
-            { expiresIn: '7d' } // Token valid for 7 days
-        );
-        
-        console.log('=== JWT created successfully ===');
-        
-        res.json({ 
-            success: true, 
-            token: jwtToken,
-            user: { 
-                id: user.id, 
-                username: user.username, 
-                email: user.email, 
-                is_premium: user.is_premium 
-            } 
-        });
-        
-    } catch (error) {
-        console.error('OAuth complete error:', error);
-        res.status(500).json({ success: false, error: 'Internal server error' });
-    }
+  // If you still need to support the previous base64 temp token -> JWT exchange,
+  // implement it here. For a typical OAuth JWT flow the callback above is enough.
 });
+*/
 
-// Add a test endpoint to check session status
-app.get("/auth/session", (req, res) => {
-    console.log('=== Session Check ===');
-    console.log('Session ID:', req.sessionID);
-    console.log('Session:', req.session);
-    console.log('User:', req.user);
-    console.log('Is authenticated:', req.isAuthenticated());
-    
-    res.json({
-        authenticated: req.isAuthenticated(),
-        sessionId: req.sessionID,
-        userId: req.session?.userId,
-        username: req.session?.username,
-        user: req.user ? { id: req.user.id, username: req.user.username, email: req.user.email } : null
-    });
-});
-
-// Auth middleware
-// JWT Authentication Middleware
+// --------------------
+// JWT middleware
+// --------------------
 const authenticateJWT = (req, res, next) => {
+  try {
+    // Look for Authorization header: "Bearer <token>"
     const authHeader = req.headers.authorization;
-    
-    if (!authHeader) {
-        // Fallback to session-based auth for backwards compatibility
-        if (req.session?.userId || req.isAuthenticated?.()) {
-            return next();
-        }
-        return res.status(401).json({ error: 'Authentication required', redirect: '/login' });
+    let token = null;
+
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      token = authHeader.split(" ")[1];
+    } else if (req.query && req.query.token) {
+      // allow token in query for special cases (e.g. initial redirect)
+      token = req.query.token;
+    } else if (req.body && req.body.token) {
+      token = req.body.token;
     }
-    
-    const token = authHeader.split(' ')[1]; // Bearer <token>
-    
-    try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        req.user = decoded;
-        req.session = { userId: decoded.id, username: decoded.username }; // For compatibility
-        next();
-    } catch (error) {
-        console.error('JWT verification failed:', error.message);
-        return res.status(401).json({ error: 'Invalid token', redirect: '/login' });
+
+    if (!token) {
+      return res.status(401).json({ error: "Authentication required", redirect: "/login" });
     }
+
+    const decoded = jwt.verify(token, JWT_SECRET);
+    // Attach user info to req.user
+    req.user = decoded;
+    next();
+  } catch (error) {
+    console.error("JWT verification failed:", error?.message || error);
+    return res.status(401).json({ error: "Invalid or expired token", redirect: "/login" });
+  }
 };
 
-// Replace requireAuth with authenticateJWT
+// Use authenticateJWT for protected routes
 const requireAuth = authenticateJWT;
 
-// Health and debug endpoints
+// --------------------
+// Basic endpoints
+// --------------------
+app.get("/test", (req, res) => {
+  res.json({ message: "Server is working", timestamp: new Date().toISOString() });
+});
+
 app.get("/health", (req, res) => {
-    res.json({ status: "ok", ts: Date.now(), env: process.env.NODE_ENV || 'development' });
+  res.json({ status: "ok", ts: Date.now(), env: process.env.NODE_ENV || "development" });
 });
 
+// Debug endpoint showing current user (if JWT provided)
 app.get("/debug/session", (req, res) => {
-    res.json({ id: req.sessionID, userId: req.session?.userId, cookie: req.session?.cookie });
-});
+  // Attempt to parse token and show decoded user if present
+  const authHeader = req.headers.authorization;
+  let token = null;
+  if (authHeader && authHeader.startsWith("Bearer ")) token = authHeader.split(" ")[1];
+  else if (req.query && req.query.token) token = req.query.token;
 
-// Database connection test endpoint - Enhanced version
-app.get("/test-db", async (req, res) => {
-  let client;
-  
+  if (!token) {
+    return res.json({ user: null });
+  }
+
   try {
-    const pool = (await import('./database/connection.js')).default;
-    
-    // Get a client from the pool
-    client = await pool.connect();
-    
-    // Test 1: Basic connectivity
-    const basicTest = await client.query('SELECT 1 as test');
-    
-    // Test 2: Get PostgreSQL version and time
-    const versionResult = await client.query('SELECT version() as pg_version, NOW() as server_time');
-    const pgVersion = versionResult.rows[0].pg_version.split(',')[0];
-    const serverTime = versionResult.rows[0].server_time;
-    
-    // Test 3: Check if application tables exist
-    const tablesResult = await client.query(`
-      SELECT table_name 
-      FROM information_schema.tables 
-      WHERE table_schema = 'public' 
-      AND table_name IN ('users', 'chats', 'messages', 'user_daily_chats')
-      ORDER BY table_name
-    `);
-    
-    const existingTables = tablesResult.rows.map(r => r.table_name);
-    const requiredTables = ['users', 'chats', 'messages', 'user_daily_chats'];
-    const missingTables = requiredTables.filter(t => !existingTables.includes(t));
-    
-    // Test 4: Get row counts for existing tables
-    const tableCounts = {};
-    for (const table of existingTables) {
-      const countResult = await client.query(`SELECT COUNT(*) as count FROM ${table}`);
-      tableCounts[table] = parseInt(countResult.rows[0].count);
-    }
-    
-    // Test 5: Pool statistics
-    const poolStats = {
-      totalConnections: pool.totalCount,
-      idleConnections: pool.idleCount,
-      waitingRequests: pool.waitingCount
-    };
-    
-    // Determine overall status
-    const allTablesExist = missingTables.length === 0;
-    const status = allTablesExist ? 'fully_configured' : 'needs_setup';
-    
-    // Build response
-    const response = {
-      success: true,
-      status: status,
-      message: allTablesExist 
-        ? "Database connected and fully configured" 
-        : "Database connected but needs table setup",
-      connection: {
-        connected: true,
-        postgresql_version: pgVersion,
-        server_time: serverTime,
-        connection_type: 'Supabase PostgreSQL'
-      },
-      tables: {
-        existing: existingTables,
-        missing: missingTables,
-        counts: tableCounts,
-        all_present: allTablesExist
-      },
-      pool: poolStats,
-      recommendations: []
-    };
-    
-    // Add recommendations if needed
-    if (!allTablesExist) {
-      response.recommendations.push({
-        action: 'setup_database',
-        message: 'Run "npm run setup-db" to create missing tables',
-        missing_tables: missingTables
-      });
-    }
-    
-    if (poolStats.totalConnections > 15) {
-      response.recommendations.push({
-        action: 'monitor_connections',
-        message: 'High number of active connections detected',
-        current: poolStats.totalConnections,
-        max: 20
-      });
-    }
-    
-    res.json(response);
-    
-  } catch (error) {
-    console.error('Database test error:', error);
-    
-    // Detailed error response
-    const errorResponse = {
-      success: false,
-      status: 'connection_failed',
-      error: {
-        message: error.message,
-        code: error.code,
-        type: error.name
-      },
-      troubleshooting: []
-    };
-    
-    // Add specific troubleshooting based on error type
-    if (error.code === 'ENOTFOUND') {
-      errorResponse.troubleshooting.push({
-        issue: 'Host not found',
-        solutions: [
-          'Check SUPABASE_DB_URL in .env file',
-          'Verify connection string format',
-          'Ensure Supabase project is active'
-        ]
-      });
-    } else if (error.code === 'ECONNREFUSED') {
-      errorResponse.troubleshooting.push({
-        issue: 'Connection refused',
-        solutions: [
-          'Check database port (5432 for direct, 6543 for pooler)',
-          'Verify Supabase project is running',
-          'Check firewall settings'
-        ]
-      });
-    } else if (error.message.includes('password')) {
-      errorResponse.troubleshooting.push({
-        issue: 'Authentication failed',
-        solutions: [
-          'Verify database password in connection string',
-          'Check if password contains special characters (URL encode them)',
-          'Reset password in Supabase dashboard if needed'
-        ]
-      });
-    } else if (error.code === 'ETIMEDOUT') {
-      errorResponse.troubleshooting.push({
-        issue: 'Connection timeout',
-        solutions: [
-          'Check your internet connection',
-          'Verify IP is allowed in Supabase settings',
-          'Check if Supabase project is paused (free tier)'
-        ]
-      });
-    } else if (error.message.includes('no pg_hba.conf entry')) {
-      errorResponse.troubleshooting.push({
-        issue: 'IP not allowed',
-        solutions: [
-          'Go to Supabase Dashboard → Settings → Database',
-          'Add your IP to allowed connections',
-          'Or allow 0.0.0.0/0 for testing (not recommended for production)'
-        ]
-      });
-    } else {
-      errorResponse.troubleshooting.push({
-        issue: 'Unknown error',
-        solutions: [
-          'Check server logs for detailed error information',
-          'Verify all environment variables are set',
-          'Try restarting the server',
-          'Contact support if issue persists'
-        ]
-      });
-    }
-    
-    // Add environment check
-    errorResponse.environment = {
-      node_env: process.env.NODE_ENV || 'development',
-      has_supabase_url: !!process.env.SUPABASE_DB_URL,
-      has_database_url: !!process.env.DATABASE_URL,
-      port: process.env.PORT || 3000
-    };
-    
-    res.status(500).json(errorResponse);
-    
-  } finally {
-    // Always release the client back to the pool
-    if (client) {
-      client.release();
-    }
+    const decoded = jwt.verify(token, JWT_SECRET);
+    return res.json({ user: decoded });
+  } catch (err) {
+    return res.json({ user: null, error: "invalid_token" });
   }
 });
 
-// Basic routes
-app.get("/", (req, res) => {
-  res.send("Hello World");
-});
-
-app.get("/welcome", (req, res) => {
-  res.json({ message: "Welcome to the server" });
-});
-
-// Auth APIs
+// --------------------
+// Auth APIs (email/password) - return JWT
+// --------------------
 app.post("/api/register", async (req, res) => {
-    try {
-        const { username, email, password } = req.body;
-
-        if (!username || !email || !password) {
-            return res.status(400).json({ success: false, error: 'All fields are required' });
-        }
-
-        const existingUser = await userQueries.findByUsername(username);
-        if (existingUser) {
-            return res.status(400).json({ success: false, error: 'Username already exists' });
-        }
-
-        const existingEmail = await userQueries.findByEmail(email);
-        if (existingEmail) {
-            return res.status(400).json({ success: false, error: 'Email already exists' });
-        }
-
-        const passwordHash = await bcrypt.hash(password, 10);
-        const newUser = await userQueries.create(username, email, passwordHash, false);
-
-        // Create JWT token
-        const token = jwt.sign(
-            { 
-                id: newUser.id, 
-                username: newUser.username,
-                email: newUser.email,
-                is_premium: newUser.is_premium
-            },
-            JWT_SECRET,
-            { expiresIn: '7d' }
-        );
-
-        res.json({ 
-            success: true, 
-            token: token,
-            user: { 
-                id: newUser.id, 
-                username: newUser.username, 
-                email: newUser.email, 
-                is_premium: newUser.is_premium 
-            } 
-        });
-    } catch (error) {
-        console.error('Registration error:', error);
-        res.status(500).json({ success: false, error: 'Internal server error' });
+  try {
+    const { username, email, password } = req.body;
+    if (!username || !email || !password) {
+      return res.status(400).json({ success: false, error: "All fields are required" });
     }
+
+    const existingUser = await userQueries.findByUsername(username);
+    if (existingUser) return res.status(400).json({ success: false, error: "Username already exists" });
+
+    const existingEmail = await userQueries.findByEmail(email);
+    if (existingEmail) return res.status(400).json({ success: false, error: "Email already exists" });
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    const newUser = await userQueries.create(username, email, passwordHash, false);
+
+    const token = jwt.sign(
+      {
+        id: newUser.id,
+        username: newUser.username,
+        email: newUser.email,
+        is_premium: newUser.is_premium,
+      },
+      JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: newUser.id,
+        username: newUser.username,
+        email: newUser.email,
+        is_premium: newUser.is_premium,
+      },
+    });
+  } catch (error) {
+    console.error("Registration error:", error);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
 });
 
 app.post("/api/login", async (req, res) => {
-    try {
-        const { username, password } = req.body;
-        const user = await userQueries.findByUsername(username);
-        
-        if (user && await bcrypt.compare(password, user.password_hash)) {
-            // Create JWT token
-            const token = jwt.sign(
-                { 
-                    id: user.id, 
-                    username: user.username,
-                    email: user.email,
-                    is_premium: user.is_premium
-                },
-                JWT_SECRET,
-                { expiresIn: '7d' }
-            );
-            
-            await userQueries.updateLastLogin(user.id);
-            
-            res.json({ 
-                success: true, 
-                token: token,
-                user: { 
-                    id: user.id, 
-                    username: user.username, 
-                    email: user.email, 
-                    is_premium: user.is_premium 
-                } 
-            });
-        } else {
-            res.status(401).json({ success: false, error: 'Invalid credentials' });
-        }
-    } catch (error) {
-        console.error('Login error:', error);
-        res.status(500).json({ success: false, error: 'Internal server error' });
+  try {
+    const { username, password } = req.body;
+    const user = await userQueries.findByUsername(username);
+
+    if (user && (await bcrypt.compare(password, user.password_hash))) {
+      const token = jwt.sign(
+        {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          is_premium: user.is_premium,
+        },
+        JWT_SECRET,
+        { expiresIn: "7d" }
+      );
+
+      await userQueries.updateLastLogin(user.id);
+
+      res.json({
+        success: true,
+        token,
+        user: {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          is_premium: user.is_premium,
+        },
+      });
+    } else {
+      res.status(401).json({ success: false, error: "Invalid credentials" });
     }
+  } catch (error) {
+    console.error("Login error:", error);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
 });
 
-app.post("/api/logout", (req, res) => {
-    req.session.destroy((err) => {
-        if (err) return res.status(500).json({ success: false, error: 'Could not log out' });
-        res.json({ success: true, message: 'Logged out successfully' });
-    });
+// --------------------
+// Auth status - requires JWT
+// --------------------
+app.get("/api/auth/status", requireAuth, async (req, res) => {
+  try {
+    const user = await userQueries.findById(req.user.id);
+    if (user) {
+      return res.json({
+        authenticated: true,
+        user: {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          is_premium: user.is_premium,
+        },
+      });
+    }
+    res.json({ authenticated: false });
+  } catch (error) {
+    console.error("Auth status error:", error);
+    res.json({ authenticated: false });
+  }
 });
 
-app.get("/api/user/chat-count", requireAuth, async (req, res) => {
-    try {
-      const userId = req.session.userId || req.user?.id;
-      if (!userId) {
-        return res.status(401).json({ success: false, error: "Unauthorized" });
-      }
-  
-      // Get total chats
-      const totalChats = await chatQueries.countByUserId(userId);
-  
-      // Get today's chats (optional)
-      const todayCount = await dailyChatQueries.getTodayCount(userId);
-  
-      res.json({ success: true, totalChats, todayCount });
-    } catch (error) {
-      console.error("Get chat count error:", error);
-      res.status(500).json({ success: false, error: "Failed to fetch chat count" });
-    }
-  });
-
-app.get("/api/auth/status", authenticateJWT, async (req, res) => {
-    try {
-        const user = await userQueries.findById(req.user.id);
-        if (user) {
-            return res.json({ 
-                authenticated: true, 
-                user: { 
-                    id: user.id, 
-                    username: user.username, 
-                    email: user.email, 
-                    is_premium: user.is_premium 
-                } 
-            });
-        }
-        res.json({ authenticated: false });
-    } catch (error) {
-        console.error('Auth status error:', error);
-        res.json({ authenticated: false });
-    }
-});
-
-// Chat APIs
+// --------------------
+// Chat APIs - use req.user.id (JWT)
+// --------------------
 app.get("/api/chats", requireAuth, async (req, res) => {
-    try {
-        const chats = await chatQueries.findByUserId(req.session.userId);
-        res.json({ success: true, chats });
-    } catch (error) {
-        console.error('Get chats error:', error);
-        res.status(500).json({ success: false, error: 'Failed to fetch chats' });
-    }
+  try {
+    const userId = req.user.id;
+    const chats = await chatQueries.findByUserId(userId);
+    res.json({ success: true, chats });
+  } catch (error) {
+    console.error("Get chats error:", error);
+    res.status(500).json({ success: false, error: "Failed to fetch chats" });
+  }
 });
 
 app.post("/api/chats", requireAuth, async (req, res) => {
-    try {
-        const { title } = req.body;
-        const userId = req.session.userId;
-        const user = await userQueries.findById(userId);
-        const canCreate = await dailyChatQueries.canCreateChat(userId, user.is_premium);
-        if (!canCreate) {
-            const limit = user.is_premium ? 20 : 5;
-            return res.status(403).json({ success: false, error: `Daily chat limit reached. You can create ${limit} chats per day.` });
-        }
-        const newChat = await chatQueries.create(userId, title || "New Chat");
-        await dailyChatQueries.incrementTodayCount(userId);
-        res.json({ success: true, chat: newChat });
-    } catch (error) {
-        console.error('Create chat error:', error);
-        res.status(500).json({ success: false, error: 'Failed to create chat' });
+  try {
+    const { title } = req.body;
+    const userId = req.user.id;
+    const user = await userQueries.findById(userId);
+    if (!user) return res.status(401).json({ success: false, error: "Unauthorized" });
+
+    const canCreate = await dailyChatQueries.canCreateChat(userId, user.is_premium);
+    if (!canCreate) {
+      const limit = user.is_premium ? 20 : 5;
+      return res.status(403).json({
+        success: false,
+        error: `Daily chat limit reached. You can create ${limit} chats per day.`,
+      });
     }
+
+    const newChat = await chatQueries.create(userId, title || "New Chat");
+    await dailyChatQueries.incrementTodayCount(userId);
+    res.json({ success: true, chat: newChat });
+  } catch (error) {
+    console.error("Create chat error:", error);
+    res.status(500).json({ success: false, error: "Failed to create chat" });
+  }
 });
 
 app.get("/api/chats/:chatId", requireAuth, async (req, res) => {
-    try {
-        const { chatId } = req.params;
-        const userId = req.session.userId;
-        const chat = await chatQueries.findById(chatId);
-        if (!chat || chat.user_id !== userId) {
-            return res.status(404).json({ success: false, error: 'Chat not found' });
-        }
-        res.json({ success: true, chat });
-    } catch (error) {
-        console.error('Get chat info error:', error);
-        res.status(500).json({ success: false, error: 'Failed to fetch chat info' });
+  try {
+    const { chatId } = req.params;
+    const userId = req.user.id;
+    const chat = await chatQueries.findById(chatId);
+    if (!chat || chat.user_id !== userId) {
+      return res.status(404).json({ success: false, error: "Chat not found" });
     }
+    res.json({ success: true, chat });
+  } catch (error) {
+    console.error("Get chat info error:", error);
+    res.status(500).json({ success: false, error: "Failed to fetch chat info" });
+  }
 });
 
 app.get("/api/chats/:chatId/messages", requireAuth, async (req, res) => {
-    try {
-        const { chatId } = req.params;
-        const userId = req.session.userId;
-        const chat = await chatQueries.findById(chatId);
-        if (!chat || chat.user_id !== userId) {
-            return res.status(404).json({ success: false, error: 'Chat not found' });
-        }
-        const messages = await messageQueries.findByChatId(chatId);
-        res.json({ success: true, messages });
-    } catch (error) {
-        console.error('Get messages error:', error);
-        res.status(500).json({ success: false, error: 'Failed to fetch messages' });
+  try {
+    const { chatId } = req.params;
+    const userId = req.user.id;
+    const chat = await chatQueries.findById(chatId);
+    if (!chat || chat.user_id !== userId) {
+      return res.status(404).json({ success: false, error: "Chat not found" });
     }
+    const messages = await messageQueries.findByChatId(chatId);
+    res.json({ success: true, messages });
+  } catch (error) {
+    console.error("Get messages error:", error);
+    res.status(500).json({ success: false, error: "Failed to fetch messages" });
+  }
 });
 
-// Step 1: Research topic
+// --------------------
+// Research flows (unchanged except auth uses req.user.id)
+// --------------------
 app.post("/api/chats/:chatId/research-topic", requireAuth, async (req, res) => {
-    try {
-        const { chatId } = req.params;
-        const { message } = req.body;
-        const userId = req.session.userId;
-        const chat = await chatQueries.findById(chatId);
-        if (!chat || chat.user_id !== userId) {
-            return res.status(404).json({ success: false, error: 'Chat not found' });
-        }
-        if (chat.is_completed || chat.has_error) {
-            return res.status(400).json({ success: false, error: 'This chat is completed or has an error. Please start a new chat.' });
-        }
-        await messageQueries.create(chatId, message, true);
-        const result = await OpenAIService.generateTitleAndQuestions(message);
-        if (result.success) {
-            const generatedTitle = result.title;
-            const questions = result.questions;
-            await chatQueries.updateTitle(chatId, generatedTitle);
-            const responseText = `I'd like to help you refine your research topic. To provide you with the most relevant research guidance, I have a few clarifying questions:\n\n${questions.map((q, i) => `${i + 1}. ${q}`).join('\n\n')}\n\nPlease answer these questions one by one, and I'll create a comprehensive research plan for you.`;
-            await messageQueries.create(chatId, responseText, false);
-            res.json({ success: true, response: responseText, messageType: 'clarifying_questions', questions, title: generatedTitle, user: req.session.username });
-        } else {
-            const errorResponse = "I'm not able to find the answer right now. Please try again.";
-            await messageQueries.create(chatId, errorResponse, false);
-            await chatQueries.markAsError(chatId);
-            res.json({ success: true, response: errorResponse, title: 'Research Topic...', user: req.session.username });
-        }
-    } catch (error) {
-        console.error('Research topic error:', error);
-        res.status(500).json({ success: false, error: 'Failed to process research topic' });
+  try {
+    const { chatId } = req.params;
+    const { message } = req.body;
+    const userId = req.user.id;
+    const chat = await chatQueries.findById(chatId);
+    if (!chat || chat.user_id !== userId) {
+      return res.status(404).json({ success: false, error: "Chat not found" });
     }
+    if (chat.is_completed || chat.has_error) {
+      return res.status(400).json({ success: false, error: "This chat is completed or has an error. Please start a new chat." });
+    }
+
+    await messageQueries.create(chatId, message, true);
+    const result = await OpenAIService.generateTitleAndQuestions(message);
+    if (result.success) {
+      const generatedTitle = result.title;
+      const questions = result.questions;
+      await chatQueries.updateTitle(chatId, generatedTitle);
+      const responseText = `I'd like to help you refine your research topic. To provide you with the most relevant research guidance, I have a few clarifying questions:\n\n${questions.map((q, i) => `${i + 1}. ${q}`).join("\n\n")}\n\nPlease answer these questions one by one, and I'll create a comprehensive research plan for you.`;
+      await messageQueries.create(chatId, responseText, false);
+      res.json({ success: true, response: responseText, messageType: "clarifying_questions", questions, title: generatedTitle, user: user.username });
+    } else {
+      const errorResponse = "I'm not able to find the answer right now. Please try again.";
+      await messageQueries.create(chatId, errorResponse, false);
+      await chatQueries.markAsError(chatId);
+      res.json({ success: true, response: errorResponse, title: "Research Topic...", user: user.username });
+    }
+  } catch (error) {
+    console.error("Research topic error:", error);
+    res.status(500).json({ success: false, error: "Failed to process research topic" });
+  }
 });
 
-// Step 2: Clarification answer
 app.post("/api/chats/:chatId/clarification-answer", requireAuth, async (req, res) => {
-    try {
-        const { chatId } = req.params;
-        const { message, questionIndex, totalQuestions, originalTopic, questions, answers } = req.body;
-        const userId = req.session.userId;
-        const chat = await chatQueries.findById(chatId);
-        if (!chat || chat.user_id !== userId) {
-            return res.status(404).json({ success: false, error: 'Chat not found' });
-        }
-        if (chat.is_completed || chat.has_error) {
-            return res.status(400).json({ success: false, error: 'This chat is completed or has an error. Please start a new chat.' });
-        }
-        await messageQueries.create(chatId, message, true);
-        if (questionIndex >= totalQuestions - 1) {
-            let researchResult = { success: false };
-            let geminiResult = { success: false };
-            try {
-                [researchResult, geminiResult] = await Promise.all([
-                    OpenAIService.generateResearchPage(originalTopic, questions, answers),
-                    GeminiService.generateResearchPage(originalTopic, questions, answers).catch(() => ({ success: false }))
-                ]);
-            } catch (e) {}
-
-            if (researchResult.success) {
-                const openaiLabeled = `## ChatGPT (OpenAI) Research\n\n${researchResult.researchPage}`;
-                const geminiLabeled = (geminiResult && geminiResult.success && geminiResult.researchPage)
-                  ? `## Gemini (Google) Research\n\n${geminiResult.researchPage}`
-                  : null;
-                await messageQueries.create(chatId, openaiLabeled, false);
-                if (geminiLabeled) await messageQueries.create(chatId, geminiLabeled, false);
-                await chatQueries.markAsCompleted(chatId);
-                res.json({ success: true, messageType: 'research_pages', openaiResearch: openaiLabeled, geminiResearch: geminiLabeled, user: req.session.username });
-            } else {
-                const errorResponse = "I'm not able to find the answer right now. Please try again.";
-                await messageQueries.create(chatId, errorResponse, false);
-                await chatQueries.markAsError(chatId);
-                res.json({ success: true, response: errorResponse, user: req.session.username });
-            }
-        } else {
-            const responseText = `Thank you for your answer. Please answer the next question.`;
-            await messageQueries.create(chatId, responseText, false);
-            res.json({ success: true, response: responseText, messageType: 'acknowledgment', user: req.session.username });
-        }
-    } catch (error) {
-        console.error('Clarification answer error:', error);
-        res.status(500).json({ success: false, error: 'Failed to process clarification answer' });
+  try {
+    const { chatId } = req.params;
+    const { message, questionIndex, totalQuestions, originalTopic, questions, answers } = req.body;
+    const userId = req.user.id;
+    const chat = await chatQueries.findById(chatId);
+    if (!chat || chat.user_id !== userId) {
+      return res.status(404).json({ success: false, error: "Chat not found" });
     }
+    if (chat.is_completed || chat.has_error) {
+      return res.status(400).json({ success: false, error: "This chat is completed or has an error. Please start a new chat." });
+    }
+    await messageQueries.create(chatId, message, true);
+
+    if (questionIndex >= totalQuestions - 1) {
+      let researchResult = { success: false };
+      let geminiResult = { success: false };
+      try {
+        [researchResult, geminiResult] = await Promise.all([
+          OpenAIService.generateResearchPage(originalTopic, questions, answers),
+          GeminiService.generateResearchPage(originalTopic, questions, answers).catch(() => ({ success: false })),
+        ]);
+      } catch (e) {}
+
+      if (researchResult.success) {
+        const openaiLabeled = `## ChatGPT (OpenAI) Research\n\n${researchResult.researchPage}`;
+        const geminiLabeled = geminiResult && geminiResult.success && geminiResult.researchPage
+          ? `## Gemini (Google) Research\n\n${geminiResult.researchPage}`
+          : null;
+        await messageQueries.create(chatId, openaiLabeled, false);
+        if (geminiLabeled) await messageQueries.create(chatId, geminiLabeled, false);
+        await chatQueries.markAsCompleted(chatId);
+        res.json({ success: true, messageType: "research_pages", openaiResearch: openaiLabeled, geminiResearch: geminiLabeled, user: user.username });
+      } else {
+        const errorResponse = "I'm not able to find the answer right now. Please try again.";
+        await messageQueries.create(chatId, errorResponse, false);
+        await chatQueries.markAsError(chatId);
+        res.json({ success: true, response: errorResponse, user: user.username });
+      }
+    } else {
+      const responseText = `Thank you for your answer. Please answer the next question.`;
+      await messageQueries.create(chatId, responseText, false);
+      res.json({ success: true, response: responseText, messageType: "acknowledgment", user: user.username });
+    }
+  } catch (error) {
+    console.error("Clarification answer error:", error);
+    res.status(500).json({ success: false, error: "Failed to process clarification answer" });
+  }
 });
 
-// Legacy message endpoint
+// Legacy message endpoint (updated to use req.user)
 app.post("/api/chats/:chatId/messages", requireAuth, async (req, res) => {
-    try {
-        const { chatId } = req.params;
-        const { message, messageType = 'regular' } = req.body;
-        const userId = req.session.userId;
-        const chat = await chatQueries.findById(chatId);
-        if (!chat || chat.user_id !== userId) {
-            return res.status(404).json({ success: false, error: 'Chat not found' });
-        }
-        await messageQueries.create(chatId, message, true);
-        const result = await OpenAIService.generateTitleAndQuestions(message);
-        if (result.success) {
-            const generatedTitle = result.title;
-            const questions = result.questions;
-            await chatQueries.updateTitle(chatId, generatedTitle);
-            const responseText = `I'd like to help you refine your research topic. To provide you with the most relevant research guidance, I have a few clarifying questions:\n\n${questions.map((q, i) => `${i + 1}. ${q}`).join('\n\n')}`;
-            await messageQueries.create(chatId, responseText, false);
-            res.json({ success: true, response: responseText, messageType: 'clarifying_questions', questions, title: generatedTitle, user: req.session.username });
-        } else {
-            const errorResponse = "I'm not able to find the answer right now. Please try again.";
-            await messageQueries.create(chatId, errorResponse, false);
-            await chatQueries.markAsError(chatId);
-            res.json({ success: true, response: errorResponse, title: 'Research Topic...', user: req.session.username });
-        }
-    } catch (error) {
-        console.error('Legacy message error:', error);
-        res.status(500).json({ success: false, error: 'Failed to send message' });
+  try {
+    const { chatId } = req.params;
+    const { message, messageType = "regular" } = req.body;
+    const userId = req.user.id;
+    const chat = await chatQueries.findById(chatId);
+    if (!chat || chat.user_id !== userId) {
+      return res.status(404).json({ success: false, error: "Chat not found" });
     }
+    await messageQueries.create(chatId, message, true);
+    const result = await OpenAIService.generateTitleAndQuestions(message);
+    if (result.success) {
+      const generatedTitle = result.title;
+      const questions = result.questions;
+      await chatQueries.updateTitle(chatId, generatedTitle);
+      const responseText = `I'd like to help you refine your research topic. To provide you with the most relevant research guidance, I have a few clarifying questions:\n\n${questions.map((q, i) => `${i + 1}. ${q}`).join("\n\n")}`;
+      await messageQueries.create(chatId, responseText, false);
+      res.json({ success: true, response: responseText, messageType: "clarifying_questions", questions, title: generatedTitle, user: user.username });
+    } else {
+      const errorResponse = "I'm not able to find the answer right now. Please try again.";
+      await messageQueries.create(chatId, errorResponse, false);
+      await chatQueries.markAsError(chatId);
+      res.json({ success: true, response: errorResponse, title: "Research Topic...", user: user.username });
+    }
+  } catch (error) {
+    console.error("Legacy message error:", error);
+    res.status(500).json({ success: false, error: "Failed to send message" });
+  }
 });
 
-// User limits
+// --------------------
+// User limits (chat count) - uses req.user.id
+// --------------------
 app.get("/api/user/chat-count", requireAuth, async (req, res) => {
-    try {
-        const userId = req.session.userId;
-        const user = await userQueries.findById(userId);
-        const todayCount = await dailyChatQueries.getTodayCount(userId);
-        const maxChats = user.is_premium ? 20 : 5;
-        res.json({ success: true, todayCount, maxChats, isPremium: user.is_premium });
-    } catch (error) {
-        console.error('Get chat count error:', error);
-        res.status(500).json({ success: false, error: 'Failed to get chat count' });
-    }
+  try {
+    const userId = req.user.id;
+    const user = await userQueries.findById(userId);
+    if (!user) return res.status(401).json({ success: false, error: "Unauthorized" });
+
+    const todayCount = await dailyChatQueries.getTodayCount(userId);
+    const maxChats = user.is_premium ? 20 : 5;
+    res.json({ success: true, todayCount, maxChats, isPremium: user.is_premium });
+  } catch (error) {
+    console.error("Get chat count error:", error);
+    res.status(500).json({ success: false, error: "Failed to get chat count" });
+  }
 });
 
-// Email
+// --------------------
+// Email: send research report
+// --------------------
 app.post("/api/chats/:chatId/send-email", requireAuth, async (req, res) => {
-    try {
-        const { chatId } = req.params;
-        const userId = req.session.userId;
-        const chat = await chatQueries.findById(chatId);
-        if (!chat || chat.user_id !== userId) {
-            return res.status(404).json({ success: false, error: 'Chat not found' });
-        }
-        const user = await userQueries.findById(userId);
-        if (!user || !user.email) {
-            return res.status(400).json({ success: false, error: 'User email not found' });
-        }
-        const messages = await messageQueries.findByChatId(chatId);
-        if (!messages || messages.length === 0) {
-            return res.status(400).json({ success: false, error: 'No messages found in chat' });
-        }
-        const aiMessages = messages.filter(msg => !msg.is_user);
-        const openaiMsg = aiMessages.find(m => (m.content || '').startsWith('## ChatGPT (OpenAI) Research')) || aiMessages[0];
-        const geminiMsg = aiMessages.find(m => (m.content || '').startsWith('## Gemini (Google) Research')) || null;
-        if (!openaiMsg) {
-            return res.status(400).json({ success: false, error: 'No research report found' });
-        }
-        const originalTopic = messages.filter(msg => msg.is_user).shift()?.content || 'Research Topic';
-        const chatgptContent = openaiMsg.content;
-        let geminiContent = geminiMsg ? geminiMsg.content : '';
-        if (!geminiContent) {
-            try {
-                const firstAi = aiMessages[0]?.content || '';
-                const clarifyingQuestions = [];
-                if (firstAi) {
-                    const matches = firstAi.split('\n').filter(l => /^\d+\.\s/.test(l)).map(l => l.replace(/^\d+\.\s/, ''))
-                    if (matches.length) clarifyingQuestions.push(...matches)
-                }
-                const userAnswers = messages.filter(m => m.is_user).slice(1).map(m => m.content)
-                const gemini = await GeminiService.generateResearchPage(originalTopic, clarifyingQuestions, userAnswers)
-                if (gemini.success) {
-                    geminiContent = `## Gemini (Google) Research\n\n${gemini.researchPage || ''}`
-                }
-            } catch (e) {}
-        }
-        const result = await sendCombinedResearchReportSendGrid(
-            user.email,
-            chatgptContent,
-            geminiContent || '## Gemini (Google) Research\n\nNo Gemini content available.',
-            originalTopic
-        );
-        res.json({ success: true, message: 'Research report sent successfully', messageId: result.messageId, summary: result.summary });
-    } catch (error) {
-        console.error('Email endpoint error:', error);
-        res.status(500).json({ success: false, error: 'Failed to send research report', details: error.message });
+  try {
+    const { chatId } = req.params;
+    const userId = req.user.id;
+    const chat = await chatQueries.findById(chatId);
+    if (!chat || chat.user_id !== userId) {
+      return res.status(404).json({ success: false, error: "Chat not found" });
     }
+    const user = await userQueries.findById(userId);
+    if (!user || !user.email) {
+      return res.status(400).json({ success: false, error: "User email not found" });
+    }
+    const messages = await messageQueries.findByChatId(chatId);
+    if (!messages || messages.length === 0) {
+      return res.status(400).json({ success: false, error: "No messages found in chat" });
+    }
+
+    const aiMessages = messages.filter((m) => !m.is_user);
+    const openaiMsg = aiMessages.find((m) => (m.content || "").startsWith("## ChatGPT (OpenAI) Research")) || aiMessages[0];
+    const geminiMsg = aiMessages.find((m) => (m.content || "").startsWith("## Gemini (Google) Research")) || null;
+    if (!openaiMsg) {
+      return res.status(400).json({ success: false, error: "No research report found" });
+    }
+
+    const originalTopic = messages.filter((m) => m.is_user).shift()?.content || "Research Topic";
+    const chatgptContent = openaiMsg.content;
+    let geminiContent = geminiMsg ? geminiMsg.content : "";
+
+    if (!geminiContent) {
+      try {
+        const firstAi = aiMessages[0]?.content || "";
+        const clarifyingQuestions = [];
+        if (firstAi) {
+          const matches = firstAi
+            .split("\n")
+            .filter((l) => /^\d+\.\s/.test(l))
+            .map((l) => l.replace(/^\d+\.\s/, ""));
+          if (matches.length) clarifyingQuestions.push(...matches);
+        }
+        const userAnswers = messages.filter((m) => m.is_user).slice(1).map((m) => m.content);
+        const gemini = await GeminiService.generateResearchPage(originalTopic, clarifyingQuestions, userAnswers);
+        if (gemini.success) {
+          geminiContent = `## Gemini (Google) Research\n\n${gemini.researchPage || ""}`;
+        }
+      } catch (e) {}
+    }
+
+    const result = await sendCombinedResearchReportSendGrid(
+      user.email,
+      chatgptContent,
+      geminiContent || "## Gemini (Google) Research\n\nNo Gemini content available.",
+      originalTopic
+    );
+
+    res.json({ success: true, message: "Research report sent successfully", messageId: result.messageId, summary: result.summary });
+  } catch (error) {
+    console.error("Email endpoint error:", error);
+    res.status(500).json({ success: false, error: "Failed to send research report", details: error.message });
+  }
 });
 
+// --------------------
+// Finalize: start server
+// --------------------
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+  console.log(`Server (JWT-only) is running on port ${PORT}`);
 });
-
-
