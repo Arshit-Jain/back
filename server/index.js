@@ -51,7 +51,7 @@ app.use("/api/auth", authRoutes);
 
 // ===== Protected Routes =====
 app.use("/api/chats", authenticateJWT, chatRoutes);
-app.use("/api/send-email", authenticateJWT, emailRoutes);
+app.use("/api/chats", authenticateJWT, emailRoutes);
 
 // ===== Start Server =====
 const PORT = process.env.PORT || 3000;
