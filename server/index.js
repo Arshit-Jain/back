@@ -9,6 +9,7 @@ import authRoutes from "./routes/auth.js";
 import chatRoutes from "./routes/chats.js";
 import emailRoutes from "./routes/email.js";
 import healthRoutes from "./routes/health.js";
+import userRoutes from "./routes/user.js";
 
 // Middleware imports
 import { authenticateJWT } from "./middleware/auth.js";
@@ -52,6 +53,7 @@ app.use("/api/auth", authRoutes);
 // ===== Protected Routes =====
 app.use("/api/chats", authenticateJWT, chatRoutes);
 app.use("/api/chats", authenticateJWT, emailRoutes);
+app.use("/api/user", authenticateJWT, userRoutes);
 
 // ===== Start Server =====
 const PORT = process.env.PORT || 3000;
