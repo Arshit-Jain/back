@@ -48,11 +48,11 @@ app.use(session({
     resave: false,
     saveUninitialized: false,
     cookie: {
-        secure: process.env.NODE_ENV === 'production',
+        secure: true, // Always true in production for HTTPS
         httpOnly: true,
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-        domain: process.env.NODE_ENV === 'production' ? undefined : undefined // Let browser handle it
+        sameSite: 'none', // Required for cross-site cookies
+        partitioned: true // Helps with third-party cookie restrictions
     },
     proxy: true,
     name: 'sessionId' // Give session cookie a specific name
