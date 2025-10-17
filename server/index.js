@@ -55,23 +55,6 @@ app.use("/api/chats", authenticateJWT, chatRoutes);
 app.use("/api/chats", authenticateJWT, emailRoutes);
 app.use("/api/user", authenticateJWT, userRoutes);
 
-router.post("api/logout", (req, res) => {
-  try {
-    res.clearCookie("jwt", {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
-      path: "/",
-    });
-
-    // Respond with success
-    return res.status(200).json({ message: "Logged out successfully" });
-  } catch (err) {
-    console.error("Logout error:", err);
-    return res.status(500).json({ message: "Logout failed" });
-  }
-});
-
 // ===== Start Server =====
 app._router.stack
   .filter(r => r.route)

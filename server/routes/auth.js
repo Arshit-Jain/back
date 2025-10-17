@@ -181,6 +181,16 @@ router.post("/oauth-complete", async (req, res) => {
   }
 });
 
+router.post("/logout", (req, res) => {
+  res.clearCookie("jwt", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    path: "/",
+  })
+  return res.status(200).json({ message: "Logged out successfully" })
+})
+
 // ===== Auth Status (requires JWT) =====
 router.get("/status", authenticateJWT, async (req, res) => {
   try {
