@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import session from "express-session";
+import connectPgSimple from "connect-pg-simple";
 import bcrypt from "bcryptjs";
 import dotenv from "dotenv";
 import passport from "passport";
@@ -15,6 +16,9 @@ import { sendCombinedResearchReportSendGrid } from "./services/emailService.js";
 dotenv.config();
 
 const app = express();
+
+// Create PostgreSQL session store
+const PgSession = connectPgSimple(session);
 
 // Trust proxy so HTTPS and host are respected behind Render/Heroku
 app.set('trust proxy', 1);
@@ -35,13 +39,18 @@ app.use(express.urlencoded({ extended: true }));
 
 // Sessions (secure in production; sameSite none for cross-site cookies)
 app.use(session({
+    store: new PgSession({
+        pool: pool, // Use your existing database pool
+        tableName: 'session', // Table name for sessions
+        createTableIfMissing: true // Automatically create the session table
+    }),
     secret: process.env.SESSION_SECRET || 'your-secret-key-change-in-production',
     resave: false,
     saveUninitialized: false,
     cookie: {
         secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
-        maxAge: 24 * 60 * 60 * 1000,
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
         sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
         domain: process.env.NODE_ENV === 'production' ? undefined : undefined // Let browser handle it
     },
