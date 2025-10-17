@@ -53,6 +53,12 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
+// Test endpoint to verify server is running
+app.get("/test", (req, res) => {
+    console.log('=== TEST ENDPOINT HIT ===');
+    res.json({ message: "Server is working", timestamp: new Date().toISOString() });
+});
+
 passport.serializeUser((user, done) => {
     console.log('Serializing user:', user.id);
     done(null, user.id);
@@ -144,6 +150,9 @@ passport.use(new GoogleStrategy.Strategy({
 // Auth endpoints
 app.get("/auth/google", (req, res, next) => {
     console.log('=== Initiating Google OAuth ===');
+    console.log('Session ID:', req.sessionID);
+    console.log('BACKEND_URL:', BACKEND_URL);
+    console.log('Callback URL will be:', `${BACKEND_URL}/auth/google/callback`);
     passport.authenticate("google", { scope: ["profile", "email"] })(req, res, next);
 });
 
@@ -152,17 +161,19 @@ app.get("/auth/google/callback",
         console.log('=== Google OAuth Callback Started ===');
         console.log('Query params:', req.query);
         console.log('Session ID:', req.sessionID);
-        console.log('Session data before auth:', req.session);
+        console.log('Session data before auth:', JSON.stringify(req.session, null, 2));
+        console.log('Headers:', JSON.stringify(req.headers, null, 2));
         
         passport.authenticate("google", (err, user, info) => {
             console.log('=== Passport Authenticate Callback ===');
             console.log('Error:', err);
-            console.log('User:', user ? { id: user.id, email: user.email } : null);
+            console.log('User:', user ? { id: user.id, email: user.email, username: user.username } : null);
             console.log('Info:', info);
             
             if (err) {
                 console.error('Authentication error:', err);
-                return res.redirect(`${FRONTEND_URL}/login?error=oauth_failed`);
+                console.error('Error stack:', err.stack);
+                return res.redirect(`${FRONTEND_URL}/login?error=oauth_failed&message=${encodeURIComponent(err.message)}`);
             }
             
             if (!user) {
@@ -170,38 +181,48 @@ app.get("/auth/google/callback",
                 return res.redirect(`${FRONTEND_URL}/login?error=no_user`);
             }
             
+            console.log('About to call req.logIn...');
+            
             // Manually establish login session
             req.logIn(user, (loginErr) => {
                 if (loginErr) {
                     console.error('Login error:', loginErr);
-                    return res.redirect(`${FRONTEND_URL}/login?error=login_failed`);
+                    console.error('Login error stack:', loginErr.stack);
+                    return res.redirect(`${FRONTEND_URL}/login?error=login_failed&message=${encodeURIComponent(loginErr.message)}`);
                 }
                 
                 console.log('=== User Logged In Successfully ===');
-                console.log('Session after login:', req.session);
+                console.log('Session after login:', JSON.stringify(req.session, null, 2));
                 console.log('User from req:', req.user);
+                console.log('isAuthenticated:', req.isAuthenticated());
                 
                 // Set additional session data
                 req.session.userId = user.id;
                 req.session.username = user.username;
                 
+                console.log('About to save session...');
+                
                 // Explicitly save session before redirect
                 req.session.save((saveErr) => {
                     if (saveErr) {
                         console.error('Session save error:', saveErr);
-                        return res.redirect(`${FRONTEND_URL}/login?error=session_failed`);
+                        console.error('Session save error stack:', saveErr.stack);
+                        return res.redirect(`${FRONTEND_URL}/login?error=session_failed&message=${encodeURIComponent(saveErr.message)}`);
                     }
                     
                     console.log('=== Session Saved Successfully ===');
-                    console.log('Final session data:', {
+                    console.log('Final session data:', JSON.stringify({
                         id: req.sessionID,
                         userId: req.session.userId,
                         username: req.session.username,
-                        passport: req.session.passport
-                    });
+                        passport: req.session.passport,
+                        cookie: req.session.cookie
+                    }, null, 2));
                     
                     // Redirect to frontend
                     console.log('Redirecting to:', FRONTEND_URL);
+                    console.log('Response headers about to be sent:', res.getHeaders());
+                    
                     res.redirect(FRONTEND_URL);
                 });
             });
