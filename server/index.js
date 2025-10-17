@@ -6,9 +6,15 @@ import bcrypt from "bcryptjs";
 import dotenv from "dotenv";
 import passport from "passport";
 import GoogleStrategy from "passport-google-oauth20";
-import pool from "./database/connection.js"
+import pool from "./database/connection.js";
 
-import { userQueries, chatQueries, messageQueries, dailyChatQueries } from "./database/queries.js";
+import {
+  userQueries,
+  chatQueries,
+  messageQueries,
+  dailyChatQueries
+} from "./database/queries.js";
+
 import { OpenAIService } from "./services/openai.js";
 import { GeminiService } from "./services/gemini.js";
 import { sendCombinedResearchReportSendGrid } from "./services/emailService.js";
@@ -17,47 +23,53 @@ dotenv.config();
 
 const app = express();
 
-// Create PostgreSQL session store
+// ✅ Initialize Postgres session store
 const PgSession = connectPgSimple(session);
 
-// Trust proxy so HTTPS and host are respected behind Render/Heroku
-app.set('trust proxy', 1);
+// ✅ Ensure proxy trust for correct cookie handling behind Render/Vercel
+app.set("trust proxy", 1);
 
-// Normalize URLs by removing trailing slashes
-const normalizeUrl = (url) => (url || '').replace(/\/+$/, '');
+// ✅ Normalize URLs to prevent trailing slash mismatches
+const normalizeUrl = (url) => (url || "").replace(/\/+$/, "");
 const FRONTEND_URL = normalizeUrl(process.env.FRONTEND_URL || "http://localhost:5173");
 const BACKEND_URL = normalizeUrl(process.env.BACKEND_URL || "http://localhost:3000");
 
-// CORS - MUST come before session
-app.use(cors({
+// ✅ CORS must be configured BEFORE session middleware
+app.use(
+  cors({
     origin: FRONTEND_URL,
-    credentials: true
-}));
+    credentials: true, // Required to send cookies
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Sessions (secure in production; sameSite none for cross-site cookies)
-app.use(session({
+// ✅ Session configuration
+app.use(
+  session({
     store: new PgSession({
-        pool: pool, // Use your existing database pool
-        tableName: 'session', // Table name for sessions
-        createTableIfMissing: true // Automatically create the session table
+      pool,
+      tableName: "session",
+      createTableIfMissing: true,
     }),
-    secret: process.env.SESSION_SECRET || 'your-secret-key-change-in-production',
+    secret: process.env.SESSION_SECRET || "your-secret-key-change-in-production",
     resave: false,
     saveUninitialized: false,
-    cookie: {
-        secure: true, // Always true in production for HTTPS
-        httpOnly: true,
-        maxAge: 24 * 60 * 60 * 1000, // 24 hours
-        sameSite: 'none' // Required for cross-site cookies
-    },
+    name: "sessionId",
     proxy: true,
-    name: 'sessionId' // Give session cookie a specific name
-}));
+    cookie: {
+      secure: process.env.NODE_ENV === "production", // HTTPS only in production
+      httpOnly: true,
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    },
+  })
+);
 
-// Passport
+// ✅ Initialize Passport (AFTER session)
 app.use(passport.initialize());
 app.use(passport.session());
 
