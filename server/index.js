@@ -51,8 +51,7 @@ app.use(session({
         secure: true, // Always true in production for HTTPS
         httpOnly: true,
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
-        sameSite: 'none', // Required for cross-site cookies
-        partitioned: true // Helps with third-party cookie restrictions
+        sameSite: 'none' // Required for cross-site cookies
     },
     proxy: true,
     name: 'sessionId' // Give session cookie a specific name
