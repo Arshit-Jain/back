@@ -42,25 +42,16 @@ export class OpenAIService {
   `;
 
       const response = await openai.chat.completions.create({
-        model: "gpt-5",
+        model: "gpt-3.5-turbo",
         messages: [{ role: "user", content: prompt }],
-        max_completion_tokens: 800,
-        response_format: { type: "json_object" }
+        temperature: 0.7,
+        max_tokens: 800
       });
 
-      const content = (response?.choices?.[0]?.message?.content || "").trim();
+      const content = response.choices[0].message.content.trim();
       console.log('=== OpenAI: Raw response for title and questions ===', content);
       
-      let result;
-      try {
-        result = JSON.parse(content);
-      } catch (parseError) {
-        const fenced = content.match(/```json[\s\S]*?```/i);
-        const objectish = content.match(/\{[\s\S]*\}/);
-        const candidate = (fenced ? fenced[0].replace(/```json|```/gi, '') : (objectish ? objectish[0] : null));
-        if (!candidate) throw parseError;
-        result = JSON.parse(candidate.trim());
-      }
+      const result = JSON.parse(content);
       console.log('=== OpenAI: Parsed title and questions ===', result);
       
       return {
