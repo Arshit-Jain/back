@@ -45,7 +45,7 @@ export class OpenAIService {
         model: process.env.CHATGPT_MODEL || "gpt-5",
         messages: [{ role: "user", content: prompt }],
         temperature: 0.7,
-        max_tokens: 800
+        max_completion_tokens: 800
       });
 
       const content = response.choices[0].message.content.trim();
@@ -123,7 +123,7 @@ export class OpenAIService {
         model: process.env.CHATGPT_MODEL || "gpt-5",
         messages: [{ role: "user", content: prompt }],
         temperature: 0.7,
-        max_tokens: 20000
+        max_completion_tokens: 20000
       });
   
       const researchContent = response.choices[0].message.content.trim();
