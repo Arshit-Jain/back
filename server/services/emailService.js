@@ -4,12 +4,29 @@ import PDFDocument from 'pdfkit'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { marked } from 'marked'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 // Configure SendGrid
 sgMail.setApiKey(process.env.SENDGRID_API_KEY)
+
+/**
+ * Convert Markdown content to HTML for email display
+ */
+const markdownToHtml = (markdownContent) => {
+  if (!markdownContent) return ''
+  
+  // Configure marked options for better email rendering
+  marked.setOptions({
+    breaks: true,
+    gfm: true,
+    sanitize: false
+  })
+  
+  return marked.parse(markdownContent)
+}
 
 /**
  * Generate a summary of the research report
@@ -106,6 +123,7 @@ const generatePDF = (researchContent, topic) => {
       // Process the content line by line
       const lines = researchContent.split('\n')
       let isInList = false
+      let isInCodeBlock = false
       
       for (const line of lines) {
         const trimmedLine = line.trim()
@@ -116,9 +134,25 @@ const generatePDF = (researchContent, topic) => {
           continue
         }
         
+        // Handle code blocks
+        if (trimmedLine.startsWith('```')) {
+          isInCodeBlock = !isInCodeBlock
+          if (isInCodeBlock) {
+            doc.moveDown(0.3)
+          }
+          continue
+        }
+        
+        if (isInCodeBlock) {
+          doc.fontSize(10)
+            .font('Courier')
+            .text(trimmedLine, { indent: 20 })
+          continue
+        }
+        
         // Handle headings
         if (trimmedLine.startsWith('# ')) {
-          doc.fontSize(18)
+          doc.fontSize(20)
             .font('Helvetica-Bold')
             .text(trimmedLine.substring(2))
             .moveDown(0.5)
@@ -132,6 +166,21 @@ const generatePDF = (researchContent, topic) => {
             .font('Helvetica-Bold')
             .text(trimmedLine.substring(4))
             .moveDown(0.2)
+        } else if (trimmedLine.startsWith('#### ')) {
+          doc.fontSize(13)
+            .font('Helvetica-Bold')
+            .text(trimmedLine.substring(5))
+            .moveDown(0.2)
+        }
+        // Handle numbered lists
+        else if (/^\d+\.\s/.test(trimmedLine)) {
+          if (!isInList) {
+            doc.moveDown(0.3)
+            isInList = true
+          }
+          doc.fontSize(12)
+            .font('Helvetica')
+            .text(trimmedLine, { indent: 20 })
         }
         // Handle bullet points
         else if (trimmedLine.startsWith('- ') || trimmedLine.startsWith('* ')) {
@@ -142,6 +191,16 @@ const generatePDF = (researchContent, topic) => {
           doc.fontSize(12)
             .font('Helvetica')
             .text(`• ${trimmedLine.substring(2)}`, { indent: 20 })
+        }
+        // Handle horizontal rules
+        else if (trimmedLine === '---' || trimmedLine === '***') {
+          doc.moveDown(0.5)
+          doc.strokeColor('#cccccc')
+          doc.lineWidth(1)
+          doc.moveTo(doc.x, doc.y)
+          doc.lineTo(doc.page.width - doc.page.margins.right, doc.y)
+          doc.stroke()
+          doc.moveDown(0.5)
         }
         // Handle regular text
         else {
@@ -213,17 +272,70 @@ const generateCombinedPDF = (chatgptContent, geminiContent, topic) => {
         doc.moveDown(0.5)
         const lines = String(content || '').split('\n')
         let inList = false
+        let inCodeBlock = false
+        
         for (const raw of lines) {
           const line = raw.trim()
           if (!line) { doc.moveDown(0.4); inList = false; continue }
-          if (line.startsWith('# ')) { doc.fontSize(16).font('Helvetica-Bold').text(line.slice(2)).moveDown(0.3); continue }
-          if (line.startsWith('## ')) { doc.fontSize(14).font('Helvetica-Bold').text(line.slice(3)).moveDown(0.2); continue }
-          if (line.startsWith('### ')) { doc.fontSize(13).font('Helvetica-Bold').text(line.slice(4)).moveDown(0.2); continue }
+          
+          // Handle code blocks
+          if (line.startsWith('```')) {
+            inCodeBlock = !inCodeBlock
+            if (inCodeBlock) {
+              doc.moveDown(0.3)
+            }
+            continue
+          }
+          
+          if (inCodeBlock) {
+            doc.fontSize(9).font('Courier').text(line, { indent: 20 })
+            continue
+          }
+          
+          // Handle headings
+          if (line.startsWith('# ')) { 
+            doc.fontSize(16).font('Helvetica-Bold').text(line.slice(2)).moveDown(0.3); 
+            continue 
+          }
+          if (line.startsWith('## ')) { 
+            doc.fontSize(14).font('Helvetica-Bold').text(line.slice(3)).moveDown(0.2); 
+            continue 
+          }
+          if (line.startsWith('### ')) { 
+            doc.fontSize(13).font('Helvetica-Bold').text(line.slice(4)).moveDown(0.2); 
+            continue 
+          }
+          if (line.startsWith('#### ')) { 
+            doc.fontSize(12).font('Helvetica-Bold').text(line.slice(5)).moveDown(0.2); 
+            continue 
+          }
+          
+          // Handle numbered lists
+          if (/^\d+\.\s/.test(line)) {
+            if (!inList) { doc.moveDown(0.2); inList = true }
+            doc.fontSize(11).font('Helvetica').text(line, { indent: 20 })
+            continue
+          }
+          
+          // Handle bullet points
           if (line.startsWith('- ') || line.startsWith('* ')) {
             if (!inList) { doc.moveDown(0.2); inList = true }
             doc.fontSize(11).font('Helvetica').text(`• ${line.slice(2)}`, { indent: 20 })
             continue
           }
+          
+          // Handle horizontal rules
+          if (line === '---' || line === '***') {
+            doc.moveDown(0.5)
+            doc.strokeColor('#cccccc')
+            doc.lineWidth(1)
+            doc.moveTo(doc.x, doc.y)
+            doc.lineTo(doc.page.width - doc.page.margins.right, doc.y)
+            doc.stroke()
+            doc.moveDown(0.5)
+            continue
+          }
+          
           doc.fontSize(11).font('Helvetica').text(line)
           inList = false
         }
@@ -270,18 +382,21 @@ export const sendResearchReport = async (userEmail, researchContent, topic) => {
     // Read PDF file
     const pdfBuffer = fs.readFileSync(filePath)
     
+    // Convert Markdown content to HTML for email display
+    const researchHtml = markdownToHtml(researchContent)
+    
     // Prepare email content
     const emailContent = {
       to: userEmail,
       from: process.env.FROM_EMAIL,
       subject: `OpenAI Deep Research Results: ${topic}`,
       html: `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; line-height: 1.6;">
           <h2 style="color: #333; text-align: center;">OpenAI Deep Research Results</h2>
           
           <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
             <h3 style="color: #495057; margin-top: 0;">Research Topic</h3>
-            <p style="font-size: 16px; color: #212529;">${topic}</p>
+            <p style="font-size: 16px; color: #212529; margin: 0;">${topic}</p>
           </div>
           
           <div style="background-color: #e3f2fd; padding: 20px; border-radius: 8px; margin: 20px 0;">
@@ -291,16 +406,23 @@ export const sendResearchReport = async (userEmail, researchContent, topic) => {
             </div>
           </div>
           
+          <div style="margin: 30px 0;">
+            <h3 style="color: #333; margin: 20px 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #007bff;">Research Report</h3>
+            <div style="background-color: #fafafa; padding: 20px; border-radius: 8px; border-left: 4px solid #007bff;">
+              ${researchHtml}
+            </div>
+          </div>
+          
           <div style="background-color: #f1f8e9; padding: 20px; border-radius: 8px; margin: 20px 0;">
             <h3 style="color: #388e3c; margin-top: 0;">Complete Report</h3>
-            <p style="color: #424242;">
+            <p style="color: #424242; margin: 0;">
               Please find the complete research report attached as a PDF document. 
-              The report contains detailed analysis, findings, and recommendations based on your research topic.
+              The PDF contains the full formatted report with proper styling and layout.
             </p>
           </div>
           
           <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #dee2e6;">
-            <p style="color: #6c757d; font-size: 14px;">
+            <p style="color: #6c757d; font-size: 14px; margin: 0;">
               This report was generated by the OpenAI Deep Research System.<br>
               Generated on ${new Date().toLocaleDateString()}
             </p>
@@ -395,23 +517,59 @@ export const sendCombinedResearchReportSendGrid = async (userEmail, chatgptConte
     filePath = pdf.filePath
     const pdfBuffer = fs.readFileSync(filePath)
 
+    // Convert Markdown content to HTML
+    const chatgptHtml = markdownToHtml(chatgptContent)
+    const geminiHtml = markdownToHtml(geminiContent)
+    
     const emailContent = {
       to: userEmail,
       from: process.env.FROM_EMAIL,
       subject: `Combined Research Results: ${topic}`,
       html: `
-        <div style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto;">
-          <h2 style="margin:0 0 10px;">Combined Research Results</h2>
-          <div style="color:#333; white-space:pre-wrap;">${summaryParagraph}</div>
-          <hr style="border:none;border-top:1px solid #eee;margin:20px 0;"/>
-          <h3 style="margin:10px 0;">ChatGPT (OpenAI) Research</h3>
-          <pre style="white-space:pre-wrap; background:#fafafa; padding:12px; border-radius:6px;">${chatgptContent}</pre>
-          <h3 style="margin:10px 0;">Gemini (Google) Research</h3>
-          <pre style="white-space:pre-wrap; background:#fafafa; padding:12px; border-radius:6px;">${geminiContent}</pre>
-          <p style="color:#666; font-size:12px;">Full combined PDF attached.</p>
+        <div style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto; line-height: 1.6;">
+          <h2 style="margin:0 0 20px; color: #333; text-align: center;">Combined Research Results</h2>
+          
+          <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <h3 style="color: #495057; margin-top: 0;">Research Topic</h3>
+            <p style="font-size: 16px; color: #212529; margin: 0;">${topic}</p>
+          </div>
+          
+          <div style="background-color: #e3f2fd; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <h3 style="color: #1976d2; margin-top: 0;">Executive Summary</h3>
+            <div style="color: #424242; white-space: pre-wrap;">${summaryParagraph}</div>
+          </div>
+          
+          <div style="margin: 30px 0;">
+            <h3 style="color: #333; margin: 20px 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #007bff;">ChatGPT (OpenAI) Research</h3>
+            <div style="background-color: #fafafa; padding: 20px; border-radius: 8px; border-left: 4px solid #007bff;">
+              ${chatgptHtml}
+            </div>
+          </div>
+          
+          <div style="margin: 30px 0;">
+            <h3 style="color: #333; margin: 20px 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #4285f4;">Gemini (Google) Research</h3>
+            <div style="background-color: #fafafa; padding: 20px; border-radius: 8px; border-left: 4px solid #4285f4;">
+              ${geminiHtml}
+            </div>
+          </div>
+          
+          <div style="background-color: #f1f8e9; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <h3 style="color: #388e3c; margin-top: 0;">Complete Report</h3>
+            <p style="color: #424242; margin: 0;">
+              Please find the complete research report attached as a PDF document. 
+              The PDF contains the full formatted report with proper styling and layout.
+            </p>
+          </div>
+          
+          <div style="text-align: center; margin-top: 30px; padding-top: 20px; border-top: 1px solid #dee2e6;">
+            <p style="color: #6c757d; font-size: 14px; margin: 0;">
+              This report was generated by the Combined Research System.<br>
+              Generated on ${new Date().toLocaleDateString()}
+            </p>
+          </div>
         </div>
       `,
-      text: `Combined Research Results\n\n${summaryParagraph}\n\n[ChatGPT (OpenAI) Research]\n${chatgptContent}\n\n[Gemini (Google) Research]\n${geminiContent}`,
+      text: `Combined Research Results\n\nResearch Topic: ${topic}\n\nExecutive Summary:\n${summaryParagraph}\n\nChatGPT (OpenAI) Research:\n${chatgptContent}\n\nGemini (Google) Research:\n${geminiContent}\n\nComplete PDF report attached.`,
       attachments: [
         {
           content: pdfBuffer.toString('base64'),
