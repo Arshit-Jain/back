@@ -44,13 +44,23 @@ export class OpenAIService {
       const response = await openai.chat.completions.create({
         model: "gpt-5",
         messages: [{ role: "user", content: prompt }],
-        max_completion_tokens: 800
+        max_completion_tokens: 800,
+        response_format: { type: "json_object" }
       });
 
-      const content = response.choices[0].message.content.trim();
+      const content = (response?.choices?.[0]?.message?.content || "").trim();
       console.log('=== OpenAI: Raw response for title and questions ===', content);
       
-      const result = JSON.parse(content);
+      let result;
+      try {
+        result = JSON.parse(content);
+      } catch (parseError) {
+        const fenced = content.match(/```json[\s\S]*?```/i);
+        const objectish = content.match(/\{[\s\S]*\}/);
+        const candidate = (fenced ? fenced[0].replace(/```json|```/gi, '') : (objectish ? objectish[0] : null));
+        if (!candidate) throw parseError;
+        result = JSON.parse(candidate.trim());
+      }
       console.log('=== OpenAI: Parsed title and questions ===', result);
       
       return {
@@ -123,8 +133,8 @@ export class OpenAIService {
         messages: [{ role: "user", content: prompt }],
         max_completion_tokens: 20000
       });
-  
-      const researchContent = response.choices[0].message.content.trim();
+
+      const researchContent = (response?.choices?.[0]?.message?.content || "").trim();
       console.log('=== OpenAI: Generated research page preview ===', researchContent.substring(0, 200) + '...');
   
       return {
