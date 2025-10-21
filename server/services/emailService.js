@@ -13,10 +13,50 @@ const __dirname = path.dirname(__filename)
 sgMail.setApiKey(process.env.SENDGRID_API_KEY)
 
 /**
+ * Aggressively remove all bold formatting from text
+ */
+const removeBoldFormatting = (text) => {
+  if (!text) return '';
+  
+  let cleaned = text;
+  
+  // Pass 1: Remove triple asterisks
+  cleaned = cleaned.replace(/\*\*\*([^*]+)\*\*\*/g, '$1');
+  
+  // Pass 2: Remove double asterisks (multiple patterns)
+  cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, '$1');
+  cleaned = cleaned.replace(/\*\*([^*\n]+)\*\*/g, '$1');
+  cleaned = cleaned.replace(/\*\*([^*\n]*?)\*\*/g, '$1');
+  cleaned = cleaned.replace(/\*\*([^*]*?)\*\*/g, '$1');
+  
+  // Pass 3: Remove single asterisks
+  cleaned = cleaned.replace(/\*([^*]+)\*/g, '$1');
+  
+  // Pass 4: Remove any remaining double asterisks
+  cleaned = cleaned.replace(/\*\*/g, '');
+  
+  // Pass 5: Remove nested or complex patterns
+  cleaned = cleaned.replace(/\*+([^*\n]+)\*+/g, '$1');
+  
+  // Pass 6: Remove any single asterisks left
+  cleaned = cleaned.replace(/\*/g, '');
+  
+  // Pass 7: One more pass to be absolutely sure
+  cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, '$1');
+  cleaned = cleaned.replace(/\*\*/g, '');
+  cleaned = cleaned.replace(/\*/g, '');
+  
+  return cleaned;
+};
+
+/**
  * Convert Markdown content to HTML for email display
  */
 const markdownToHtml = (markdownContent) => {
   if (!markdownContent) return ''
+  
+  // Remove bold formatting before converting
+  const cleanedContent = removeBoldFormatting(markdownContent);
   
   // Configure marked options for better email rendering
   marked.setOptions({
@@ -25,39 +65,35 @@ const markdownToHtml = (markdownContent) => {
     sanitize: false
   })
   
-  return marked.parse(markdownContent)
+  return marked.parse(cleanedContent)
 }
 
 /**
  * Generate a summary of the research report
  */
 const generateSummary = (researchContent) => {
-  // Extract key sections and create a concise summary
-  const lines = researchContent.split('\n')
+  const cleanContent = removeBoldFormatting(researchContent);
+  const lines = cleanContent.split('\n')
   const summary = []
   
-  // Find main headings and key points
   let currentSection = ''
   let keyPoints = []
   
   for (const line of lines) {
     const trimmedLine = line.trim()
     
-    // Capture main headings
     if (trimmedLine.startsWith('# ')) {
       if (currentSection && keyPoints.length > 0) {
-        summary.push(`**${currentSection}**: ${keyPoints.slice(0, 3).join('; ')}`)
+        summary.push(`${currentSection}: ${keyPoints.slice(0, 3).join('; ')}`)
       }
       currentSection = trimmedLine.substring(2)
       keyPoints = []
     }
-    // Capture subheadings and key points
     else if (trimmedLine.startsWith('## ') || trimmedLine.startsWith('### ')) {
       if (trimmedLine.length > 0) {
         keyPoints.push(trimmedLine.substring(trimmedLine.indexOf(' ') + 1))
       }
     }
-    // Capture bullet points
     else if (trimmedLine.startsWith('- ') || trimmedLine.startsWith('* ')) {
       if (trimmedLine.length > 0) {
         keyPoints.push(trimmedLine.substring(2))
@@ -65,9 +101,8 @@ const generateSummary = (researchContent) => {
     }
   }
   
-  // Add the last section
   if (currentSection && keyPoints.length > 0) {
-    summary.push(`**${currentSection}**: ${keyPoints.slice(0, 3).join('; ')}`)
+    summary.push(`${currentSection}: ${keyPoints.slice(0, 3).join('; ')}`)
   }
   
   return summary.join('\n\n')
@@ -79,6 +114,9 @@ const generateSummary = (researchContent) => {
 const generatePDF = (researchContent, topic) => {
   return new Promise((resolve, reject) => {
     try {
+      // Remove all bold formatting before generating PDF
+      const cleanContent = removeBoldFormatting(researchContent);
+      
       const doc = new PDFDocument({
         size: 'A4',
         margins: {
@@ -89,7 +127,6 @@ const generatePDF = (researchContent, topic) => {
         }
       })
       
-      // Create a temporary file path
       const tempDir = path.join(__dirname, '../temp')
       if (!fs.existsSync(tempDir)) {
         fs.mkdirSync(tempDir, { recursive: true })
@@ -98,30 +135,25 @@ const generatePDF = (researchContent, topic) => {
       const fileName = `research-report-${Date.now()}.pdf`
       const filePath = path.join(tempDir, fileName)
       
-      // Pipe the PDF to a file
       const stream = fs.createWriteStream(filePath)
       doc.pipe(stream)
       
-      // Add title
       doc.fontSize(24)
         .font('Helvetica-Bold')
         .text('OpenAI Deep Research Results', { align: 'center' })
       
       doc.moveDown(1)
       
-      // Add topic
       doc.fontSize(18)
         .font('Helvetica')
         .text(`Research Topic: ${topic}`, { align: 'center' })
       
       doc.moveDown(2)
       
-      // Add content
       doc.fontSize(12)
         .font('Helvetica')
       
-      // Process the content line by line
-      const lines = researchContent.split('\n')
+      const lines = cleanContent.split('\n')
       let isInList = false
       let isInCodeBlock = false
       
@@ -134,7 +166,6 @@ const generatePDF = (researchContent, topic) => {
           continue
         }
         
-        // Handle code blocks
         if (trimmedLine.startsWith('```')) {
           isInCodeBlock = !isInCodeBlock
           if (isInCodeBlock) {
@@ -150,7 +181,6 @@ const generatePDF = (researchContent, topic) => {
           continue
         }
         
-        // Handle headings
         if (trimmedLine.startsWith('# ')) {
           doc.fontSize(20)
             .font('Helvetica-Bold')
@@ -172,7 +202,6 @@ const generatePDF = (researchContent, topic) => {
             .text(trimmedLine.substring(5))
             .moveDown(0.2)
         }
-        // Handle numbered lists
         else if (/^\d+\.\s/.test(trimmedLine)) {
           if (!isInList) {
             doc.moveDown(0.3)
@@ -182,7 +211,6 @@ const generatePDF = (researchContent, topic) => {
             .font('Helvetica')
             .text(trimmedLine, { indent: 20 })
         }
-        // Handle bullet points
         else if (trimmedLine.startsWith('- ') || trimmedLine.startsWith('* ')) {
           if (!isInList) {
             doc.moveDown(0.3)
@@ -192,7 +220,6 @@ const generatePDF = (researchContent, topic) => {
             .font('Helvetica')
             .text(`• ${trimmedLine.substring(2)}`, { indent: 20 })
         }
-        // Handle horizontal rules
         else if (trimmedLine === '---' || trimmedLine === '***') {
           doc.moveDown(0.5)
           doc.strokeColor('#cccccc')
@@ -202,7 +229,6 @@ const generatePDF = (researchContent, topic) => {
           doc.stroke()
           doc.moveDown(0.5)
         }
-        // Handle regular text
         else {
           doc.fontSize(12)
             .font('Helvetica')
@@ -211,14 +237,12 @@ const generatePDF = (researchContent, topic) => {
         }
       }
       
-      // Add footer
       doc.moveDown(2)
       doc.fontSize(10)
         .font('Helvetica')
         .text('Generated by OpenAI Deep Research System', { align: 'center' })
       doc.text(new Date().toLocaleDateString(), { align: 'center' })
       
-      // Finalize the PDF
       doc.end()
       
       stream.on('finish', () => {
@@ -239,7 +263,8 @@ const generatePDF = (researchContent, topic) => {
  * Generate a short paragraph summary from combined markdown
  */
 const generateSummaryParagraph = (combinedMarkdown) => {
-  const text = combinedMarkdown
+  const cleanedMarkdown = removeBoldFormatting(combinedMarkdown);
+  const text = cleanedMarkdown
     .replace(/[#*_`>-]/g, '')
     .replace(/\n+/g, ' ')
     .trim()
@@ -252,6 +277,10 @@ const generateSummaryParagraph = (combinedMarkdown) => {
 const generateCombinedPDF = (chatgptContent, geminiContent, topic) => {
   return new Promise((resolve, reject) => {
     try {
+      // Remove all bold formatting from both contents
+      const cleanChatGPT = removeBoldFormatting(chatgptContent);
+      const cleanGemini = removeBoldFormatting(geminiContent);
+      
       const doc = new PDFDocument({ size: 'A4', margins: { top: 50, bottom: 50, left: 50, right: 50 } })
       const tempDir = path.join(__dirname, '../temp')
       if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true })
@@ -278,7 +307,6 @@ const generateCombinedPDF = (chatgptContent, geminiContent, topic) => {
           const line = raw.trim()
           if (!line) { doc.moveDown(0.4); inList = false; continue }
           
-          // Handle code blocks
           if (line.startsWith('```')) {
             inCodeBlock = !inCodeBlock
             if (inCodeBlock) {
@@ -292,7 +320,6 @@ const generateCombinedPDF = (chatgptContent, geminiContent, topic) => {
             continue
           }
           
-          // Handle headings
           if (line.startsWith('# ')) { 
             doc.fontSize(16).font('Helvetica-Bold').text(line.slice(2)).moveDown(0.3); 
             continue 
@@ -310,21 +337,18 @@ const generateCombinedPDF = (chatgptContent, geminiContent, topic) => {
             continue 
           }
           
-          // Handle numbered lists
           if (/^\d+\.\s/.test(line)) {
             if (!inList) { doc.moveDown(0.2); inList = true }
             doc.fontSize(11).font('Helvetica').text(line, { indent: 20 })
             continue
           }
           
-          // Handle bullet points
           if (line.startsWith('- ') || line.startsWith('* ')) {
             if (!inList) { doc.moveDown(0.2); inList = true }
             doc.fontSize(11).font('Helvetica').text(`• ${line.slice(2)}`, { indent: 20 })
             continue
           }
           
-          // Handle horizontal rules
           if (line === '---' || line === '***') {
             doc.moveDown(0.5)
             doc.strokeColor('#cccccc')
@@ -341,8 +365,8 @@ const generateCombinedPDF = (chatgptContent, geminiContent, topic) => {
         }
       }
 
-      writeMarkdown('ChatGPT (OpenAI) Research', chatgptContent)
-      writeMarkdown('Gemini (Google) Research', geminiContent)
+      writeMarkdown('ChatGPT (OpenAI) Research', cleanChatGPT)
+      writeMarkdown('Gemini (Google) Research', cleanGemini)
 
       doc.end()
       stream.on('finish', () => resolve({ filePath, fileName }))
@@ -360,7 +384,6 @@ export const sendResearchReport = async (userEmail, researchContent, topic) => {
   try {
     console.log('=== Email Service: Starting email generation ===', { userEmail, topic })
     
-    // Validate SendGrid configuration
     if (!process.env.SENDGRID_API_KEY) {
       throw new Error('SendGrid API key not configured. Please set SENDGRID_API_KEY in your environment variables.')
     }
@@ -369,23 +392,17 @@ export const sendResearchReport = async (userEmail, researchContent, topic) => {
       throw new Error('From email not configured. Please set FROM_EMAIL in your environment variables.')
     }
     
-    // Generate summary
     const summary = generateSummary(researchContent)
     console.log('=== Email Service: Summary generated ===', { summaryLength: summary.length })
     
-    // Generate PDF
     const pdfResult = await generatePDF(researchContent, topic)
     filePath = pdfResult.filePath
     const fileName = pdfResult.fileName
     console.log('=== Email Service: PDF generated ===', { fileName })
     
-    // Read PDF file
     const pdfBuffer = fs.readFileSync(filePath)
-    
-    // Convert Markdown content to HTML for email display
     const researchHtml = markdownToHtml(researchContent)
     
-    // Prepare email content
     const emailContent = {
       to: userEmail,
       from: process.env.FROM_EMAIL,
@@ -453,12 +470,10 @@ export const sendResearchReport = async (userEmail, researchContent, topic) => {
       ]
     }
     
-    // Send email
     console.log('=== Email Service: Sending email ===')
     const result = await sgMail.send(emailContent)
     console.log('=== Email Service: Email sent successfully ===', { messageId: result[0].headers['x-message-id'] })
     
-    // Clean up temporary file
     fs.unlinkSync(filePath)
     console.log('=== Email Service: Temporary file cleaned up ===')
     
@@ -471,7 +486,6 @@ export const sendResearchReport = async (userEmail, researchContent, topic) => {
   } catch (error) {
     console.error('=== Email Service: Error sending email ===', error)
     
-    // Clean up temporary file if it exists
     try {
       if (filePath && fs.existsSync(filePath)) {
         fs.unlinkSync(filePath)
@@ -501,7 +515,7 @@ export const sendCombinedResearchReportSendGrid = async (userEmail, chatgptConte
 
     const combinedMarkdown = `## ChatGPT (OpenAI)\n\n${chatgptContent}\n\n---\n\n## Gemini (Google)\n\n${geminiContent}`
     let summaryParagraph = ''
-    // Prefer Gemini summary per request; fallback to local summarizer
+    
     try {
       const sum = await GeminiService.summarizeCombinedReport(combinedMarkdown)
       if (sum.success && sum.summary) {
@@ -517,7 +531,6 @@ export const sendCombinedResearchReportSendGrid = async (userEmail, chatgptConte
     filePath = pdf.filePath
     const pdfBuffer = fs.readFileSync(filePath)
 
-    // Convert Markdown content to HTML
     const chatgptHtml = markdownToHtml(chatgptContent)
     const geminiHtml = markdownToHtml(geminiContent)
     

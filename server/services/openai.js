@@ -51,7 +51,6 @@ export class OpenAIService {
       const content = (response?.choices?.[0]?.message?.content || "").trim();
       console.log('=== OpenAI: Raw response for title and questions ===', content);
       
-      // Check if content is empty
       if (!content) {
         throw new Error('Empty response from OpenAI API');
       }
@@ -63,7 +62,6 @@ export class OpenAIService {
         console.error('=== OpenAI: JSON Parse Error ===', parseError);
         console.error('=== OpenAI: Raw content that failed to parse ===', content);
         
-        // Attempt to salvage JSON from code fences or extra text
         const fencedMatch = content.match(/```json[\s\S]*?\{[\s\S]*?\}[\s\S]*?```/i) || content.match(/\{[\s\S]*\}/);
         if (fencedMatch) {
           const extracted = fencedMatch[0]
@@ -78,7 +76,6 @@ export class OpenAIService {
       
       console.log('=== OpenAI: Parsed title and questions ===', result);
       
-      // Validate the parsed result
       if (!result || typeof result !== 'object') {
         throw new Error('Invalid JSON structure');
       }
@@ -118,16 +115,14 @@ export class OpenAIService {
     try {
       console.log('=== OpenAI: Generating research page ===', { originalTopic, clarifyingQuestions, answers, useWebSearch, reasoningLevel });
   
-      // Create Q&A context string
       const qaContext = clarifyingQuestions && clarifyingQuestions.length > 0 
         ? clarifyingQuestions.map((question, index) => 
             `Q${index + 1}: ${question}\nA${index + 1}: ${answers[index] || 'No answer provided'}`
           ).join('\n\n')
         : `No specific clarifying questions were provided. Generate comprehensive research based on the topic itself.`;
   
-      // Define the prompt
       const prompt = `
-  You are an expert research assistant. Using the original research topic${clarifyingQuestions && clarifyingQuestions.length > 0 ? ' and the clarifying questions and answers provided' : ''}, generate a complete, professional research page.
+  You are an expert research assistant. Generate a complete, professional research page based on the following information.
   
   Original Research Topic:
   "${originalTopic}"
@@ -148,40 +143,41 @@ export class OpenAIService {
   - Academic research and studies
   - Industry reports and insights
   
-  Make sure to cite all sources properly using inline citations. The web search will provide you with current, up-to-date information that will enhance the quality and accuracy of your research page.
+  Make sure to cite all sources properly using inline citations.
   ` : ''}
   
-  Your goal is to produce a refined, detailed research document that demonstrates academic depth and logical structure.
+  CRITICAL INSTRUCTIONS:
+  1. Generate ONLY the research content - DO NOT include any preambles, introductions, or meta-commentary
+  2. DO NOT start with phrases like "I'd like to help you" or "Here is your research"
+  3. Start directly with the research content
+  4. DO NOT use bold formatting (**text**) anywhere in your response
+  5. Use clean, professional formatting with simple headings and bullet points only
   
   The research page must include the following sections:
   
-  1. **Refined Research Question or Topic** — Rewrite the research topic into a precise and well-defined question or statement based on the clarifications.
-  2. **Background & Context** — Provide a brief overview of the topic's importance, relevance, and background. ${useWebSearch ? 'Include current trends and developments from recent research.' : ''}
-  3. **Research Objectives** — Clearly outline 3-5 key objectives or goals of the research.
-  4. **Proposed Methodology** — Suggest suitable research methods (qualitative, quantitative, experimental, etc.) and justify why they fit the topic.
-  5. **Scope & Limitations** — Define the scope of the study, including what will and will not be covered, and mention any foreseeable challenges.
-  6. **Key Considerations** — Highlight ethical, practical, or contextual considerations relevant to the research.
-  7. **Potential Sources & Further Directions** — List suggested data sources, references, and possible future extensions of the study.
-  8. **Expected Outcomes or Insights** — Briefly describe the potential results or contributions this research could make.
+  1. Refined Research Question or Topic
+  2. Background & Context${useWebSearch ? ' (include current trends and developments from recent research)' : ''}
+  3. Research Objectives (3-5 key objectives)
+  4. Proposed Methodology (with justification)
+  5. Scope & Limitations
+  6. Key Considerations
+  7. Potential Sources & Further Directions
+  8. Expected Outcomes or Insights
   
   Formatting requirements:
-  - Return the entire research page in **Markdown format**.
-  - Use clear section headings (#, ##, ###, etc.) for readability.
-  - Maintain a **formal, academic tone** suitable for professional or university-level research.
-  - Do **not** include any preamble, commentary, or explanations outside the research page.
-  ${useWebSearch ? '- Include inline citations where appropriate using [source] format.' : ''}
-  - Use clean, professional formatting without excessive bold text
+  - Return in Markdown format with clear section headings (#, ##, ###)
+  - Maintain a formal, academic tone
+  - DO NOT use any bold formatting (**text** or *text*)
   - Make links readable: "Link text (URL)" format instead of markdown links
   - Keep paragraphs well-spaced and concise
-  - Do not include provider names or duplicate headers in the content
-  
-  Output only the Markdown-formatted research page.
+  - DO NOT include provider names or duplicate headers
+  ${useWebSearch ? '- Include inline citations using [source] format' : ''}
+  - Output ONLY the research page content, no preamble or explanation
   `;
   
       let response;
       
       if (useWebSearch) {
-        // Use responses.create for web search capabilities
         console.log('=== OpenAI: Using web search with responses.create API ===');
         response = await openai.responses.create({
           model: process.env.CHATGPT_MODEL || "gpt-5",
@@ -189,7 +185,6 @@ export class OpenAIService {
           input: prompt
         });
       } else {
-        // Use regular chat completions for non-web search
         console.log('=== OpenAI: Using standard chat completions ===');
         response = await openai.chat.completions.create({
           model: process.env.CHATGPT_MODEL || "gpt-5",
@@ -201,7 +196,6 @@ export class OpenAIService {
       let researchContent, annotations, toolCalls;
       
       if (useWebSearch) {
-        // Parse web search response
         researchContent = response.output_text || "";
         annotations = response.output?.annotations || [];
         toolCalls = response.output?.web_search_calls || [];
@@ -210,7 +204,6 @@ export class OpenAIService {
         console.log('=== OpenAI: Citations count ===', annotations.length);
         console.log('=== OpenAI: Web search calls count ===', toolCalls.length);
       } else {
-        // Parse regular chat completion response
         researchContent = (response?.choices?.[0]?.message?.content || "").trim();
         annotations = [];
         toolCalls = [];
@@ -218,6 +211,13 @@ export class OpenAIService {
         console.log('=== OpenAI: Generated research page preview ===', researchContent.substring(0, 200) + '...');
         console.log('=== OpenAI: Using model knowledge (no web search) ===');
       }
+      
+      // Remove any remaining preambles that might have slipped through
+      researchContent = researchContent
+        .replace(/^I'd like to help you.*?comprehensive research (?:for you|plan for you)\.?\s*/gis, '')
+        .replace(/^I'd like to help you.*?Please answer.*?one by one.*?\.?\s*/gis, '')
+        .replace(/^Here is (?:your|the) (?:comprehensive )?research.*?:?\s*/gi, '')
+        .trim();
   
       return {
         success: true,
@@ -251,15 +251,15 @@ export class OpenAIService {
       console.log('=== OpenAI: Generating comprehensive web research ===', { topic, reasoningLevel });
       
       const prompt = `
-You are a research assistant tasked with conducting comprehensive web research on the following topic:
+You are a research assistant conducting comprehensive web research on the following topic:
 
 Research Topic: "${topic}"
 
 Your goal is to:
-1. Search for current, authoritative information about this topic
+1. Search for current, authoritative information
 2. Analyze multiple sources and perspectives
 3. Synthesize findings into a comprehensive overview
-4. Provide proper citations for all sources used
+4. Provide proper citations for all sources
 
 Search strategy:
 - Start with broad searches to understand the topic landscape
@@ -275,7 +275,8 @@ Provide a detailed research summary with inline citations. Include:
 - Relevant statistics or data
 - Future implications or directions
 
-Make sure to cite all sources properly using the citation format provided by the search results.
+IMPORTANT: DO NOT use bold formatting (**text**). Use simple headings and bullet points only.
+Make sure to cite all sources properly.
 `;
 
       const response = await openai.responses.create({

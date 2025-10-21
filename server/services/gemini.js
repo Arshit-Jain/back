@@ -49,21 +49,41 @@ Create a well-structured research page that includes:
 4. Important considerations and scope
 5. Potential sources and directions for further research
 
-IMPORTANT FORMATTING REQUIREMENTS:
+CRITICAL FORMATTING REQUIREMENTS:
 - Use clean, professional formatting
-- NEVER use bold formatting (**text** or *text*)
-- Use simple headings with # and ##
+- ABSOLUTELY NO BOLD FORMATTING - Never use **text** or *text* for emphasis
+- Use simple headings with # and ## only
 - Make links clean and readable: "Link text (URL)" instead of markdown links
 - Use bullet points with - instead of numbered lists where appropriate
 - Keep paragraphs concise and well-spaced
-- Do not include provider names or headers in the content
-- Avoid ALL markdown formatting except basic headings and bullet points
+- Do not include provider names (Gemini, Google) or headers in the content
+- Avoid ALL markdown formatting except basic headings (#, ##) and bullet points (-)
+- No asterisks (*) for emphasis or bold - they will be removed
+- Use plain text throughout the document
 
-Format the response in clean markdown.`
+Format the response in clean markdown WITHOUT any bold formatting.`
 
       const model = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL || 'gemini-2.5-pro' })
       const result = await model.generateContent({ contents: [{ role: 'user', parts: [{ text: prompt }] }] })
-      const text = result.response?.text?.() || result.response?.candidates?.[0]?.content?.parts?.[0]?.text || ''
+      let text = result.response?.text?.() || result.response?.candidates?.[0]?.content?.parts?.[0]?.text || ''
+
+      // Aggressively remove any bold formatting that Gemini might have added
+      text = text
+        .replace(/\*\*\*([^*]+)\*\*\*/g, '$1')  // Triple asterisks
+        .replace(/\*\*([^*]+)\*\*/g, '$1')       // Double asterisks
+        .replace(/\*\*([^*\n]+)\*\*/g, '$1')     // Double asterisks (no newline)
+        .replace(/\*\*([^*\n]*?)\*\*/g, '$1')    // Double asterisks (lazy)
+        .replace(/\*\*([^*]*?)\*\*/g, '$1')      // Double asterisks (very lazy)
+        .replace(/\*([^*]+)\*/g, '$1')           // Single asterisks
+        .replace(/\*\*/g, '')                     // Any remaining **
+        .replace(/\*/g, '')                       // Any remaining *
+        // Second pass
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/\*\*/g, '')
+        // Third pass for nested
+        .replace(/\*+([^*\n]+)\*+/g, '$1')
+        .replace(/\*\*/g, '')
+        .replace(/\*/g, '');
 
       return { success: true, researchPage: text }
     } catch (error) {
@@ -80,11 +100,37 @@ Format the response in clean markdown.`
   static async summarizeCombinedReport(combinedMarkdown) {
     try {
       if (!genAI) throw new Error('GEMINI_API_KEY is not configured')
-      const prompt = `Summarize the following combined research (includes sections from ChatGPT and Gemini) into 2 to 3 concise paragraphs, totaling about 150 to 200 words. Use neutral, professional tone. Do not include headings or lists.\n\nCONTENT START\n${combinedMarkdown}\nCONTENT END`
+      
+      const prompt = `Summarize the following combined research (includes sections from ChatGPT and Gemini) into 2 to 3 concise paragraphs, totaling about 150 to 200 words. Use neutral, professional tone. 
+
+IMPORTANT: Do not use any bold formatting (**text** or *text*). Use plain text only. Do not include headings or lists. Just write clear, simple paragraphs.
+
+CONTENT START
+${combinedMarkdown}
+CONTENT END`
+
       const model = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL || 'gemini-2.5-pro' })
       const result = await model.generateContent({ contents: [{ role: 'user', parts: [{ text: prompt }] }] })
-      const text = result.response?.text?.() || result.response?.candidates?.[0]?.content?.parts?.[0]?.text || ''
-      return { success: true, summary: text.trim() }
+      let text = result.response?.text?.() || result.response?.candidates?.[0]?.content?.parts?.[0]?.text || ''
+      
+      // Remove any bold formatting from the summary
+      text = text
+        .replace(/\*\*\*([^*]+)\*\*\*/g, '$1')
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/\*\*([^*\n]+)\*\*/g, '$1')
+        .replace(/\*\*([^*\n]*?)\*\*/g, '$1')
+        .replace(/\*\*([^*]*?)\*\*/g, '$1')
+        .replace(/\*([^*]+)\*/g, '$1')
+        .replace(/\*\*/g, '')
+        .replace(/\*/g, '')
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/\*\*/g, '')
+        .replace(/\*+([^*\n]+)\*+/g, '$1')
+        .replace(/\*\*/g, '')
+        .replace(/\*/g, '')
+        .trim();
+      
+      return { success: true, summary: text }
     } catch (error) {
       console.error('=== Gemini: Error summarizing combined report ===', error)
       return { success: false, error: 'Failed to summarize combined report' }
@@ -93,5 +139,3 @@ Format the response in clean markdown.`
 }
 
 export default { GeminiService }
-
-

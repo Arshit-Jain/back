@@ -13,20 +13,27 @@ function cleanResearchContent(content, provider) {
   // Remove duplicate headers and clean up formatting
   let cleaned = content
     // Remove duplicate provider headers and variations
-    .replace(new RegExp(`^#+\\s*${provider}[\\s\\n]*`, 'gmi'), '')
+    .replace(new RegExp(`^#+\\s*${provider}[\\s\\n]*Research[\\s\\n]*`, 'gmi'), '')
     .replace(new RegExp(`^#+\\s*${provider}[\\s\\n]*`, 'gmi'), '')
     .replace(/^#+\s*Research\s*Page:?\s*/gmi, '')
     .replace(/^#+\s*Comparative\s*Analysis\s*/gmi, '')
-    // Remove ALL markdown bold formatting (multiple patterns)
+    // Remove "I'd like to help you..." preamble from ChatGPT
+    .replace(/^I'd like to help you.*?comprehensive research (?:for you|plan for you)\.?\s*/gis, '')
+    .replace(/^I'd like to help you.*?Please answer.*?one by one.*?\.?\s*/gis, '')
+    // Remove ALL markdown bold formatting (multiple aggressive patterns)
+    .replace(/\*\*\*([^*]+)\*\*\*/g, '$1')  // Triple asterisks
+    .replace(/\*\*([^*]+)\*\*/g, '$1')       // Double asterisks
+    .replace(/\*\*([^*\n]+)\*\*/g, '$1')     // Double asterisks (no newline)
+    .replace(/\*\*([^*\n]*?)\*\*/g, '$1')    // Double asterisks (lazy)
+    .replace(/\*\*([^*]*?)\*\*/g, '$1')      // Double asterisks (very lazy)
+    .replace(/\*([^*]+)\*/g, '$1')           // Single asterisks
+    .replace(/\*\*/g, '')                     // Any remaining **
+    .replace(/\*/g, '')                       // Any remaining *
+    // Second pass to catch any that got through
     .replace(/\*\*([^*]+)\*\*/g, '$1')
-    .replace(/\*\*([^*\n]+)\*\*/g, '$1')
-    .replace(/\*\*([^*\n]*?)\*\*/g, '$1')
-    .replace(/\*\*([^*]*?)\*\*/g, '$1')
-    // Remove single asterisk bold formatting
-    .replace(/\*([^*]+)\*/g, '$1')
-    // Remove any remaining asterisks
     .replace(/\*\*/g, '')
-    .replace(/\*/g, '')
+    // Third pass for nested or complex cases
+    .replace(/\*+([^*\n]+)\*+/g, '$1')
     // Clean up links - make them more readable
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)')
     // Remove extra whitespace and line breaks
@@ -209,15 +216,30 @@ router.post("/:chatId/clarification-answer", async (req, res) => {
           ? cleanResearchContent(geminiResult.researchPage, 'Gemini|Google')
           : null;
         
-        // Additional aggressive cleaning for Gemini content
-        const finalGemini = cleanedGemini ? cleanedGemini
-          .replace(/\*\*([^*]*?)\*\*/g, '$1')
-          .replace(/\*([^*]*?)\*/g, '$1')
-          .replace(/\*\*/g, '')
-          .replace(/\*/g, '')
-          .replace(/\*\*([^*\n]*?)\*\*/g, '$1')
-          .replace(/\*\*([^*]*?)\*\*/g, '$1')
-          : null;
+        // Additional aggressive cleaning for Gemini content - multiple passes
+        let finalGemini = cleanedGemini;
+        if (finalGemini) {
+          // Pass 1: Standard cleaning
+          finalGemini = finalGemini
+            .replace(/\*\*\*([^*]+)\*\*\*/g, '$1')
+            .replace(/\*\*([^*]+)\*\*/g, '$1')
+            .replace(/\*([^*]+)\*/g, '$1')
+            .replace(/\*\*/g, '')
+            .replace(/\*/g, '');
+          
+          // Pass 2: Aggressive cleaning for any remaining
+          finalGemini = finalGemini
+            .replace(/\*\*([^*\n]*?)\*\*/g, '$1')
+            .replace(/\*\*([^*]*?)\*\*/g, '$1')
+            .replace(/\*+([^*\n]+)\*+/g, '$1')
+            .replace(/\*+/g, '');
+          
+          // Pass 3: Final cleanup
+          finalGemini = finalGemini
+            .replace(/\*\*/g, '')
+            .replace(/\*/g, '')
+            .trim();
+        }
 
         const openaiLabeled = `# ChatGPT (OpenAI) Research\n\n${cleanedOpenAI}`;
         const geminiLabeled = finalGemini 
