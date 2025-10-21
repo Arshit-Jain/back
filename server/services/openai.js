@@ -42,10 +42,10 @@ export class OpenAIService {
   `;
 
       const response = await openai.chat.completions.create({
-        model: "gpt-3.5-turbo",
+        model: process.env.CHATGPT_MODEL || "gpt-5",
         messages: [{ role: "user", content: prompt }],
-        temperature: 0.7,
-        max_tokens: 800
+        max_completion_tokens: 800,
+        response_format: { type: "json_object" }
       });
 
       const content = response.choices[0].message.content.trim();
@@ -132,32 +132,46 @@ export class OpenAIService {
   Output only the Markdown-formatted research page.
   `;
   
-      // Prepare API call parameters
-      const apiParams = {
-        model: process.env.CHATGPT_MODEL || "gpt-5",
-        messages: [{ role: "user", content: prompt }],
-        max_completion_tokens: 20000
-      };
-
-      // Add web search tool if enabled
+      let response;
+      
       if (useWebSearch) {
-        apiParams.tools = [{
-          type: "web_search"
-        }];
-        apiParams.tool_choice = "auto";
-        apiParams.reasoning_effort = reasoningLevel;
+        // Use responses.create for web search capabilities
+        console.log('=== OpenAI: Using web search with responses.create API ===');
+        response = await openai.responses.create({
+          model: process.env.CHATGPT_MODEL || "gpt-5",
+          tools: [{ type: "web_search" }],
+          input: prompt
+        });
+      } else {
+        // Use regular chat completions for non-web search
+        console.log('=== OpenAI: Using standard chat completions ===');
+        response = await openai.chat.completions.create({
+          model: process.env.CHATGPT_MODEL || "gpt-5",
+          messages: [{ role: "user", content: prompt }],
+          max_completion_tokens: 20000
+        });
       }
 
-      // Make OpenAI API call
-      const response = await openai.chat.completions.create(apiParams);
-
-      const researchContent = (response?.choices?.[0]?.message?.content || "").trim();
-      const annotations = response?.choices?.[0]?.message?.annotations || [];
-      const toolCalls = response?.choices?.[0]?.message?.tool_calls || [];
+      let researchContent, annotations, toolCalls;
       
-      console.log('=== OpenAI: Generated research page preview ===', researchContent.substring(0, 200) + '...');
-      console.log('=== OpenAI: Citations count ===', annotations.length);
-      console.log('=== OpenAI: Tool calls count ===', toolCalls.length);
+      if (useWebSearch) {
+        // Parse web search response
+        researchContent = response.output_text || "";
+        annotations = response.output?.annotations || [];
+        toolCalls = response.output?.web_search_calls || [];
+        
+        console.log('=== OpenAI: Generated research page preview ===', researchContent.substring(0, 200) + '...');
+        console.log('=== OpenAI: Citations count ===', annotations.length);
+        console.log('=== OpenAI: Web search calls count ===', toolCalls.length);
+      } else {
+        // Parse regular chat completion response
+        researchContent = (response?.choices?.[0]?.message?.content || "").trim();
+        annotations = [];
+        toolCalls = [];
+        
+        console.log('=== OpenAI: Generated research page preview ===', researchContent.substring(0, 200) + '...');
+        console.log('=== OpenAI: Using model knowledge (no web search) ===');
+      }
   
       return {
         success: true,
@@ -186,7 +200,7 @@ export class OpenAIService {
    * @param {string} reasoningLevel - Reasoning level: "fast", "medium", "long" (default: "medium")
    * @returns {Promise<Object>} Comprehensive research with citations
    */
-  static async generateWebResearch(topic, reasoningLevel = "medium") {
+  static async generateWebResearch(topic, reasoningLevel = "high") {
     try {
       console.log('=== OpenAI: Generating comprehensive web research ===', { topic, reasoningLevel });
       
@@ -218,20 +232,15 @@ Provide a detailed research summary with inline citations. Include:
 Make sure to cite all sources properly using the citation format provided by the search results.
 `;
 
-      const response = await openai.chat.completions.create({
-        model: process.env.CHATGPT_MODEL || "gpt-4o-mini",
-        messages: [{ role: "user", content: prompt }],
-        tools: [{
-          type: "web_search"
-        }],
-        tool_choice: "auto",
-        reasoning_effort: reasoningLevel,
-        max_completion_tokens: 4000
+      const response = await openai.responses.create({
+        model: process.env.CHATGPT_MODEL || "gpt-5",
+        tools: [{ type: "web_search" }],
+        input: prompt
       });
 
-      const content = (response?.choices?.[0]?.message?.content || "").trim();
-      const annotations = response?.choices?.[0]?.message?.annotations || [];
-      const toolCalls = response?.choices?.[0]?.message?.tool_calls || [];
+      const content = response.output_text || "";
+      const annotations = response.output?.annotations || [];
+      const toolCalls = response.output?.web_search_calls || [];
       
       console.log('=== OpenAI: Web search completed ===', { 
         contentLength: content?.length || 0, 
