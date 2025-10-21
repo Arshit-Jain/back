@@ -44,14 +44,50 @@ export class OpenAIService {
       const response = await openai.chat.completions.create({
         model: process.env.CHATGPT_MODEL || "gpt-5",
         messages: [{ role: "user", content: prompt }],
-        max_completion_tokens: 800
+        max_completion_tokens: 800,
+        response_format: { type: "json_object" }
       });
 
-      const content = response.choices[0].message.content.trim();
+      const content = (response?.choices?.[0]?.message?.content || "").trim();
       console.log('=== OpenAI: Raw response for title and questions ===', content);
       
-      const result = JSON.parse(content);
+      // Check if content is empty
+      if (!content) {
+        throw new Error('Empty response from OpenAI API');
+      }
+      
+      let result;
+      try {
+        result = JSON.parse(content);
+      } catch (parseError) {
+        console.error('=== OpenAI: JSON Parse Error ===', parseError);
+        console.error('=== OpenAI: Raw content that failed to parse ===', content);
+        
+        // Attempt to salvage JSON from code fences or extra text
+        const fencedMatch = content.match(/```json[\s\S]*?\{[\s\S]*?\}[\s\S]*?```/i) || content.match(/\{[\s\S]*\}/);
+        if (fencedMatch) {
+          const extracted = fencedMatch[0]
+            .replace(/```json|```/gi, '')
+            .trim();
+          console.log('=== OpenAI: Extracted JSON ===', extracted);
+          result = JSON.parse(extracted);
+        } else {
+          throw parseError;
+        }
+      }
+      
       console.log('=== OpenAI: Parsed title and questions ===', result);
+      
+      // Validate the parsed result
+      if (!result || typeof result !== 'object') {
+        throw new Error('Invalid JSON structure');
+      }
+      if (!result.title || typeof result.title !== 'string') {
+        throw new Error('Missing or invalid title field');
+      }
+      if (!result.questions || !Array.isArray(result.questions)) {
+        throw new Error('Missing or invalid questions field');
+      }
       
       return {
         success: true,
