@@ -25,50 +25,38 @@ router.post("/:chatId/send-email", async (req, res) => {
     }
 
     // Get chat messages
+    // [handler function start]
+    // Get chat messages
     const messages = await messageQueries.findByChatId(chatId);
-    if (!messages || messages.length === 0) {
-      return res.status(400).json({ success: false, error: "No messages found in chat" });
+    if (!messages || messages.length < 3) { // We need at least 1 user message and 2 AI messages
+      return res.status(400).json({ success: false, error: "Not enough messages found in chat to generate a report." });
     }
 
-    // Extract research content
+    // --- REFACTORED LOGIC START ---
+
+    // 1. Extract only AI-generated messages
     const aiMessages = messages.filter((m) => !m.is_user);
-    const openaiMsg =
-      aiMessages.find((m) => (m.content || "").startsWith("## ChatGPT (OpenAI) Research")) || aiMessages[0];
-    const geminiMsg = aiMessages.find((m) => (m.content || "").startsWith("## Gemini (Google) Research")) || null;
 
-    if (!openaiMsg) {
-      return res.status(400).json({ success: false, error: "No research report found" });
+    // 2. Validate that we have at least two AI messages to work with
+    if (aiMessages.length < 2) {
+      return res.status(400).json({
+        success: false,
+        error: "Chat does not contain the required OpenAI and Gemini reports.",
+      });
     }
 
-    // Get original topic
-    const originalTopic = messages.filter((m) => m.is_user).shift()?.content || "Research Topic";
+    // 3. Get original topic from the first user message
+    // Using .find() is slightly more efficient than .filter().shift()
+    const originalTopic = messages.find((m) => m.is_user)?.content || "Research Topic";
+
+    // 4. Assign reports based on their position
+    // The last message is assumed to be from Gemini.
+    const geminiMsg = aiMessages[aiMessages.length - 1];
+    // The second-to-last message is assumed to be from OpenAI.
+    const openaiMsg = aiMessages[aiMessages.length - 2];
+
     const chatgptContent = openaiMsg.content;
-    let geminiContent = geminiMsg ? geminiMsg.content : "";
-
-    // If Gemini content missing, try to generate it
-    if (!geminiContent) {
-      try {
-        const firstAi = aiMessages[0]?.content || "";
-        const clarifyingQuestions = [];
-
-        if (firstAi) {
-          const matches = firstAi
-            .split("\n")
-            .filter((l) => /^\d+\.\s/.test(l))
-            .map((l) => l.replace(/^\d+\.\s/, ""));
-          if (matches.length) clarifyingQuestions.push(...matches);
-        }
-
-        const userAnswers = messages.filter((m) => m.is_user).slice(1).map((m) => m.content);
-        const gemini = await GeminiService.generateResearchPage(originalTopic, clarifyingQuestions, userAnswers);
-
-        if (gemini.success) {
-          geminiContent = `## Gemini (Google) Research\n\n${gemini.researchPage || ""}`;
-        }
-      } catch (e) {
-        console.error("Error generating Gemini content for email:", e);
-      }
-    }
+    const geminiContent = geminiMsg.content;
 
     // Send email
     const result = await sendCombinedResearchReportSendGrid(
