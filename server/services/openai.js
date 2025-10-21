@@ -79,7 +79,7 @@ export class OpenAIService {
    * @param {string} reasoningLevel - Reasoning level: "fast", "medium", "long" (default: "medium")
    * @returns {Promise<Object>} Research page content
    */
-  static async generateResearchPage(originalTopic, clarifyingQuestions, answers, useWebSearch = true, reasoningLevel = "medium") {
+  static async generateResearchPage(originalTopic, clarifyingQuestions, answers, useWebSearch = true, reasoningLevel = "high") {
     try {
       console.log('=== OpenAI: Generating research page ===', { originalTopic, clarifyingQuestions, answers, useWebSearch, reasoningLevel });
   
@@ -128,6 +128,10 @@ export class OpenAIService {
   - Maintain a **formal, academic tone** suitable for professional or university-level research.
   - Do **not** include any preamble, commentary, or explanations outside the research page.
   ${useWebSearch ? '- Include inline citations where appropriate using [source] format.' : ''}
+  - Use clean, professional formatting without excessive bold text
+  - Make links readable: "Link text (URL)" format instead of markdown links
+  - Keep paragraphs well-spaced and concise
+  - Do not include provider names or duplicate headers in the content
   
   Output only the Markdown-formatted research page.
   `;

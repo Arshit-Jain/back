@@ -28,7 +28,30 @@ export class GeminiService {
         return `Q${i + 1}: ${q}\nA${i + 1}: ${a}`
       }).join('\n\n')
 
-      const prompt = `You are a research assistant. Create a comprehensive research page based on the original research topic and the clarifying questions and answers provided.\n\nOriginal Research Topic: "${originalTopic}"\n\nClarifying Questions and Answers:\n${qaContext}\n\nCreate a well-structured research page that includes:\n1. A refined research question/topic based on the clarifications\n2. Key research objectives\n3. Suggested research methodology\n4. Important considerations and scope\n5. Potential sources and directions for further research\n\nFormat the response in markdown.`
+      const prompt = `You are a research assistant. Create a comprehensive research page based on the original research topic and the clarifying questions and answers provided.
+
+Original Research Topic: "${originalTopic}"
+
+Clarifying Questions and Answers:
+${qaContext}
+
+Create a well-structured research page that includes:
+1. A refined research question/topic based on the clarifications
+2. Key research objectives
+3. Suggested research methodology
+4. Important considerations and scope
+5. Potential sources and directions for further research
+
+IMPORTANT FORMATTING REQUIREMENTS:
+- Use clean, professional formatting
+- Avoid excessive bold formatting (**text**)
+- Use simple headings with # and ##
+- Make links clean and readable: "Link text (URL)" instead of markdown links
+- Use bullet points with - instead of numbered lists where appropriate
+- Keep paragraphs concise and well-spaced
+- Do not include provider names or headers in the content
+
+Format the response in clean markdown.`
 
       const model = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL || 'gemini-2.5-pro' })
       const result = await model.generateContent({ contents: [{ role: 'user', parts: [{ text: prompt }] }] })

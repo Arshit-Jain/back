@@ -6,6 +6,33 @@ import { GeminiService } from "../services/gemini.js";
 
 const router = express.Router();
 
+// Helper function to clean up research content for better PDF formatting
+function cleanResearchContent(content, provider) {
+  if (!content) return '';
+  
+  // Remove duplicate headers and clean up formatting
+  let cleaned = content
+    // Remove duplicate provider headers and variations
+    .replace(new RegExp(`^#+\\s*${provider}[\\s\\n]*`, 'gmi'), '')
+    .replace(new RegExp(`^#+\\s*${provider}[\\s\\n]*`, 'gmi'), '')
+    .replace(/^#+\s*Research\s*Page:?\s*/gmi, '')
+    .replace(/^#+\s*Comparative\s*Analysis\s*/gmi, '')
+    // Remove extra markdown bold formatting
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    // Clean up links - make them more readable
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)')
+    // Remove extra whitespace and line breaks
+    .replace(/\n{3,}/g, '\n\n')
+    // Clean up numbered lists formatting
+    .replace(/^\d+\)\s*/gm, '- ')
+    .replace(/^\d+\.\s*/gm, '- ')
+    // Remove extra spaces
+    .replace(/[ \t]+$/gm, '')
+    .trim();
+  
+  return cleaned;
+}
+
 // ===== Get all chats for user =====
 router.get("/", async (req, res) => {
   try {
@@ -168,11 +195,16 @@ router.post("/:chatId/clarification-answer", async (req, res) => {
       }
 
       if (researchResult.success) {
-        const openaiLabeled = `## ChatGPT (OpenAI) Research\n\n${researchResult.researchPage}`;
-        const geminiLabeled =
-          geminiResult?.success && geminiResult.researchPage
-            ? `## Gemini (Google) Research\n\n${geminiResult.researchPage}`
-            : null;
+        // Clean up the research content for better formatting
+        const cleanedOpenAI = cleanResearchContent(researchResult.researchPage, 'ChatGPT|OpenAI');
+        const cleanedGemini = geminiResult?.success && geminiResult.researchPage 
+          ? cleanResearchContent(geminiResult.researchPage, 'Gemini|Google')
+          : null;
+
+        const openaiLabeled = `# ChatGPT (OpenAI) Research\n\n${cleanedOpenAI}`;
+        const geminiLabeled = cleanedGemini 
+          ? `# Gemini (Google) Research\n\n${cleanedGemini}`
+          : null;
 
         await messageQueries.create(chatId, openaiLabeled, false);
         if (geminiLabeled) await messageQueries.create(chatId, geminiLabeled, false);
