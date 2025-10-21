@@ -75,11 +75,13 @@ export class OpenAIService {
    * @param {string} originalTopic - The original research topic
    * @param {Array} clarifyingQuestions - The clarifying questions that were asked
    * @param {Array} answers - The user's answers to the clarifying questions
+   * @param {boolean} useWebSearch - Whether to enhance with web search (default: true)
+   * @param {string} reasoningLevel - Reasoning level: "fast", "medium", "long" (default: "medium")
    * @returns {Promise<Object>} Research page content
    */
-  static async generateResearchPage(originalTopic, clarifyingQuestions, answers) {
+  static async generateResearchPage(originalTopic, clarifyingQuestions, answers, useWebSearch = true, reasoningLevel = "medium") {
     try {
-      console.log('=== OpenAI: Generating research page ===', { originalTopic, clarifyingQuestions, answers });
+      console.log('=== OpenAI: Generating research page ===', { originalTopic, clarifyingQuestions, answers, useWebSearch, reasoningLevel });
   
       // Create Q&A context string
       const qaContext = clarifyingQuestions.map((question, index) => 
@@ -96,12 +98,23 @@ export class OpenAIService {
   Clarifying Questions and Answers:
   ${qaContext}
   
+  ${useWebSearch ? `
+  IMPORTANT: You have access to web search capabilities. Use them to gather current, authoritative information about this topic. Search for:
+  - Recent developments and trends
+  - Current statistics and data
+  - Expert opinions and analysis
+  - Academic research and studies
+  - Industry reports and insights
+  
+  Make sure to cite all sources properly using inline citations. The web search will provide you with current, up-to-date information that will enhance the quality and accuracy of your research page.
+  ` : ''}
+  
   Your goal is to produce a refined, detailed research document that demonstrates academic depth and logical structure.
   
   The research page must include the following sections:
   
   1. **Refined Research Question or Topic** — Rewrite the research topic into a precise and well-defined question or statement based on the clarifications.
-  2. **Background & Context** — Provide a brief overview of the topic's importance, relevance, and background.
+  2. **Background & Context** — Provide a brief overview of the topic's importance, relevance, and background. ${useWebSearch ? 'Include current trends and developments from recent research.' : ''}
   3. **Research Objectives** — Clearly outline 3-5 key objectives or goals of the research.
   4. **Proposed Methodology** — Suggest suitable research methods (qualitative, quantitative, experimental, etc.) and justify why they fit the topic.
   5. **Scope & Limitations** — Define the scope of the study, including what will and will not be covered, and mention any foreseeable challenges.
@@ -114,26 +127,48 @@ export class OpenAIService {
   - Use clear section headings (#, ##, ###, etc.) for readability.
   - Maintain a **formal, academic tone** suitable for professional or university-level research.
   - Do **not** include any preamble, commentary, or explanations outside the research page.
+  ${useWebSearch ? '- Include inline citations where appropriate using [source] format.' : ''}
   
   Output only the Markdown-formatted research page.
   `;
   
-      // Make OpenAI API call
-      const response = await openai.chat.completions.create({
+      // Prepare API call parameters
+      const apiParams = {
         model: process.env.CHATGPT_MODEL || "gpt-5",
         messages: [{ role: "user", content: prompt }],
         max_completion_tokens: 20000
-      });
+      };
+
+      // Add web search tool if enabled
+      if (useWebSearch) {
+        apiParams.tools = [{
+          type: "web_search"
+        }];
+        apiParams.tool_choice = "auto";
+        apiParams.reasoning_effort = reasoningLevel;
+      }
+
+      // Make OpenAI API call
+      const response = await openai.chat.completions.create(apiParams);
 
       const researchContent = (response?.choices?.[0]?.message?.content || "").trim();
+      const annotations = response?.choices?.[0]?.message?.annotations || [];
+      const toolCalls = response?.choices?.[0]?.message?.tool_calls || [];
+      
       console.log('=== OpenAI: Generated research page preview ===', researchContent.substring(0, 200) + '...');
+      console.log('=== OpenAI: Citations count ===', annotations.length);
+      console.log('=== OpenAI: Tool calls count ===', toolCalls.length);
   
       return {
         success: true,
         researchPage: researchContent,
         originalTopic,
         clarifyingQuestions,
-        answers
+        answers,
+        webSearchUsed: useWebSearch,
+        citations: annotations,
+        searchCalls: toolCalls,
+        reasoningLevel
       };
   
     } catch (error) {
@@ -141,6 +176,85 @@ export class OpenAIService {
       return {
         success: false,
         error: 'Failed to generate research page'
+      };
+    }
+  }
+
+  /**
+   * Generate comprehensive research using web search for any topic
+   * @param {string} topic - The research topic
+   * @param {string} reasoningLevel - Reasoning level: "fast", "medium", "long" (default: "medium")
+   * @returns {Promise<Object>} Comprehensive research with citations
+   */
+  static async generateWebResearch(topic, reasoningLevel = "medium") {
+    try {
+      console.log('=== OpenAI: Generating comprehensive web research ===', { topic, reasoningLevel });
+      
+      const prompt = `
+You are a research assistant tasked with conducting comprehensive web research on the following topic:
+
+Research Topic: "${topic}"
+
+Your goal is to:
+1. Search for current, authoritative information about this topic
+2. Analyze multiple sources and perspectives
+3. Synthesize findings into a comprehensive overview
+4. Provide proper citations for all sources used
+
+Search strategy:
+- Start with broad searches to understand the topic landscape
+- Narrow down to specific aspects as needed
+- Look for recent developments, statistics, expert opinions
+- Verify information across multiple sources
+- Focus on credible domains (academic, government, established organizations)
+
+Provide a detailed research summary with inline citations. Include:
+- Key findings and insights
+- Current trends and developments
+- Different perspectives or viewpoints
+- Relevant statistics or data
+- Future implications or directions
+
+Make sure to cite all sources properly using the citation format provided by the search results.
+`;
+
+      const response = await openai.chat.completions.create({
+        model: process.env.CHATGPT_MODEL || "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+        tools: [{
+          type: "web_search"
+        }],
+        tool_choice: "auto",
+        reasoning_effort: reasoningLevel,
+        max_completion_tokens: 4000
+      });
+
+      const content = (response?.choices?.[0]?.message?.content || "").trim();
+      const annotations = response?.choices?.[0]?.message?.annotations || [];
+      const toolCalls = response?.choices?.[0]?.message?.tool_calls || [];
+      
+      console.log('=== OpenAI: Web search completed ===', { 
+        contentLength: content?.length || 0, 
+        citationsCount: annotations.length,
+        toolCallsCount: toolCalls.length
+      });
+
+      return {
+        success: true,
+        researchContent: content,
+        citations: annotations,
+        searchCalls: toolCalls,
+        topic,
+        reasoningLevel
+      };
+
+    } catch (error) {
+      console.error('=== OpenAI: Error performing web research ===', error);
+      return {
+        success: false,
+        error: 'Failed to perform web research',
+        researchContent: '',
+        citations: []
       };
     }
   }
