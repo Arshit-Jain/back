@@ -44,7 +44,6 @@ export class OpenAIService {
       const response = await openai.chat.completions.create({
         model: process.env.CHATGPT_MODEL || "gpt-5",
         messages: [{ role: "user", content: prompt }],
-        temperature: 0.7,
         max_completion_tokens: 800
       });
 
