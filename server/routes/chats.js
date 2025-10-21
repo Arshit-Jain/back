@@ -20,6 +20,16 @@ function cleanResearchContent(content, provider) {
     // Remove "I'd like to help you..." preamble from ChatGPT
     .replace(/^I'd like to help you.*?comprehensive research (?:for you|plan for you)\.?\s*/gis, '')
     .replace(/^I'd like to help you.*?Please answer.*?one by one.*?\.?\s*/gis, '')
+    // Remove clarifying questions sections
+    .replace(/^#+\s*Clarifying Questions.*?(?=^#+\s*[A-Z]|\n\n[A-Z])/gims, '')
+    .replace(/To provide you with.*?I have.*?questions:?\s*/gi, '')
+    .replace(/Please answer.*?questions.*?one by one.*?\./gi, '')
+    // Remove methodology suggestion sections (these are advice, not research)
+    .replace(/^#+\s*Proposed Methodology.*?(?=^#+\s*[A-Z])/gims, '')
+    .replace(/^#+\s*Research Methodology.*?(?=^#+\s*[A-Z])/gims, '')
+    .replace(/^#+\s*Suggested Research Methods?.*?(?=^#+\s*[A-Z])/gims, '')
+    // Remove numbered question lists
+    .replace(/\n\d+\.\s+(?:Which|What|How|Are|Do|Does|Is|Can|Should|Would|Will)[^\n]+\?/g, '')
     // Remove ALL markdown bold formatting (multiple aggressive patterns)
     .replace(/\*\*\*([^*]+)\*\*\*/g, '$1')  // Triple asterisks
     .replace(/\*\*([^*]+)\*\*/g, '$1')       // Double asterisks

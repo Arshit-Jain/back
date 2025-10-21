@@ -147,22 +147,31 @@ export class OpenAIService {
   ` : ''}
   
   CRITICAL INSTRUCTIONS:
-  1. Generate ONLY the research content - DO NOT include any preambles, introductions, or meta-commentary
-  2. DO NOT start with phrases like "I'd like to help you" or "Here is your research"
-  3. Start directly with the research content
-  4. DO NOT use bold formatting (**text**) anywhere in your response
-  5. Use clean, professional formatting with simple headings and bullet points only
+  1. You are conducting ACTUAL RESEARCH - not giving advice on how to do research
+  2. Provide SUBSTANTIVE FINDINGS, DATA, and ANALYSIS - not research methodology suggestions
+  3. DO NOT tell the user how to conduct research - CONDUCT THE RESEARCH YOURSELF
+  4. Generate ONLY the research content - NO preambles, introductions, or meta-commentary
+  5. DO NOT start with phrases like "I'd like to help you" or "Here is your research"
+  6. DO NOT include clarifying questions - those have already been answered
+  7. Start directly with substantive research findings
+  8. DO NOT use bold formatting (**text**) anywhere in your response
+  9. Use clean, professional formatting with simple headings and bullet points only
   
-  The research page must include the following sections:
+  The research page must include ACTUAL RESEARCH FINDINGS in these sections:
   
-  1. Refined Research Question or Topic
-  2. Background & Context${useWebSearch ? ' (include current trends and developments from recent research)' : ''}
-  3. Research Objectives (3-5 key objectives)
-  4. Proposed Methodology (with justification)
-  5. Scope & Limitations
-  6. Key Considerations
-  7. Potential Sources & Further Directions
-  8. Expected Outcomes or Insights
+  1. Refined Research Question - State the focused research question based on the clarifications
+  2. Executive Summary - Provide a concise overview of your key findings (2-3 paragraphs)
+  3. Current State of the Field - Present actual data, statistics, and recent developments you found
+  4. Key Findings & Analysis - Provide 5-7 substantive findings with supporting evidence and data
+  5. Expert Perspectives - Include actual quotes, opinions, and insights from credible sources
+  6. Case Studies or Examples - Present 2-3 real-world examples with specific details
+  7. Trends & Future Directions - Analyze current trends with data and predict future developments
+  8. Comparative Analysis - Compare different approaches, models, or perspectives with evidence
+  9. Challenges & Considerations - Discuss real challenges backed by research and data
+  10. Recommendations - Provide specific, actionable recommendations based on your findings
+  11. Cited Sources - List all sources used (you must cite throughout the document)
+  
+  REMEMBER: You are a researcher presenting FINDINGS, not a consultant suggesting how to research!
   
   Formatting requirements:
   - Return in Markdown format with clear section headings (#, ##, ###)

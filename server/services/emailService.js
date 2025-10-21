@@ -13,6 +13,34 @@ const __dirname = path.dirname(__filename)
 sgMail.setApiKey(process.env.SENDGRID_API_KEY)
 
 /**
+ * Remove clarifying questions and methodology sections from content
+ */
+const removeQuestionsAndMethodology = (text) => {
+  if (!text) return '';
+  
+  let cleaned = text;
+  
+  // Remove clarifying questions sections
+  cleaned = cleaned
+    .replace(/^#+\s*Clarifying Questions.*?(?=^#+\s*[A-Z]|\n\n[A-Z])/gims, '')
+    .replace(/To provide you with.*?I have.*?questions:?\s*/gi, '')
+    .replace(/Please answer.*?questions.*?one by one.*?\./gi, '')
+    .replace(/I'd like to help you.*?comprehensive research.*?\./gis, '');
+  
+  // Remove methodology suggestion sections
+  cleaned = cleaned
+    .replace(/^#+\s*Proposed Methodology.*?(?=^#+\s*[A-Z])/gims, '')
+    .replace(/^#+\s*Research Methodology.*?(?=^#+\s*[A-Z])/gims, '')
+    .replace(/^#+\s*Suggested Research Methods?.*?(?=^#+\s*[A-Z])/gims, '')
+    .replace(/Suggested research methods?:?\s*\(.*?\)\.?/gi, '');
+  
+  // Remove numbered question lists
+  cleaned = cleaned.replace(/\n\d+\.\s+(?:Which|What|How|Are|Do|Does|Is|Can|Should|Would|Will)[^\n]+\?/g, '');
+  
+  return cleaned.trim();
+};
+
+/**
  * Aggressively remove all bold formatting from text
  */
 const removeBoldFormatting = (text) => {
