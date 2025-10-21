@@ -29,16 +29,19 @@ export class OpenAIService {
   
   Research Topic: "${researchTopic}"
   
-  Return your response strictly as a JSON object in this format:
+  Return your response strictly as a valid JSON object in this exact format:
   {
     "title": "Your generated title here",
     "questions": ["Question 1", "Question 2", "Question 3"]
   }
   
-  Guidelines:
-  - The title must be concise, specific, and relevant to the topic. If the topic is too vague, end the title with "..." to indicate it needs clarification.
-  - The questions must aim to narrow down scope, specify intent, or clarify focus.
-  - Do NOT include any text, notes, or explanations outside the JSON.
+  CRITICAL REQUIREMENTS:
+  - Return ONLY the JSON object, no other text
+  - Ensure the JSON is properly formatted and valid
+  - The title must be concise, specific, and relevant to the topic
+  - The questions must aim to narrow down scope, specify intent, or clarify focus
+  - Include exactly 2-4 questions in the questions array
+  - Do NOT include any explanatory text, markdown formatting, or code blocks
   `;
 
       const response = await openai.chat.completions.create({
@@ -48,11 +51,36 @@ export class OpenAIService {
         response_format: { type: "json_object" }
       });
 
-      const content = response.choices[0].message.content.trim();
+      const content = (response?.choices?.[0]?.message?.content || "").trim();
       console.log('=== OpenAI: Raw response for title and questions ===', content);
       
-      const result = JSON.parse(content);
+      let result;
+      try {
+        result = JSON.parse(content);
+      } catch (parseError) {
+        // Attempt to salvage JSON from code fences or extra text
+        const fencedMatch = content.match(/```json[\s\S]*?\{[\s\S]*?\}[\s\S]*?```/i) || content.match(/\{[\s\S]*\}/);
+        if (fencedMatch) {
+          const extracted = fencedMatch[0]
+            .replace(/```json|```/gi, '')
+            .trim();
+          result = JSON.parse(extracted);
+        } else {
+          throw parseError;
+        }
+      }
       console.log('=== OpenAI: Parsed title and questions ===', result);
+      
+      // Validate the parsed result
+      if (!result || typeof result !== 'object') {
+        throw new Error('Invalid JSON structure');
+      }
+      if (!result.title || typeof result.title !== 'string') {
+        throw new Error('Missing or invalid title field');
+      }
+      if (!result.questions || !Array.isArray(result.questions)) {
+        throw new Error('Missing or invalid questions field');
+      }
       
       return {
         success: true,

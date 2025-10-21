@@ -82,6 +82,7 @@ FRONTEND_URL=http://localhost:5173
 
 # OpenAI Configuration
 OPENAI_API_KEY=your-openai-api-key
+CHATGPT_MODEL=gpt-4o  
 
 # Gemini Configuration
 GEMINI_API_KEY=your-gemini-api-key
