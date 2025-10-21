@@ -48,6 +48,7 @@ Create a well-structured research page that includes:
 3. Suggested research methodology
 4. Important considerations and scope
 5. Potential sources and directions for further research
+6. Write about 1000 to 2000 words.
 
 CRITICAL FORMATTING REQUIREMENTS:
 - Use clean, professional formatting
