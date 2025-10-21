@@ -50,6 +50,115 @@ const removeBoldFormatting = (text) => {
 };
 
 /**
+ * Parse text for URLs and return array of segments with link info
+ */
+const parseTextWithLinks = (text) => {
+  if (!text) return [];
+  
+  const segments = [];
+  
+  // Match markdown links [text](url) and plain URLs
+  const markdownLinkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  
+  let lastIndex = 0;
+  let match;
+  
+  // First, find all markdown links
+  const markdownMatches = [];
+  while ((match = markdownLinkRegex.exec(text)) !== null) {
+    markdownMatches.push({
+      index: match.index,
+      length: match[0].length,
+      text: match[1],
+      url: match[2],
+      type: 'markdown'
+    });
+  }
+  
+  // Then find plain URLs that aren't part of markdown links
+  const urlMatches = [];
+  let tempText = text;
+  markdownMatches.forEach(m => {
+    tempText = tempText.substring(0, m.index) + ' '.repeat(m.length) + tempText.substring(m.index + m.length);
+  });
+  
+  while ((match = urlRegex.exec(tempText)) !== null) {
+    urlMatches.push({
+      index: match.index,
+      length: match[0].length,
+      url: match[1],
+      type: 'plain'
+    });
+  }
+  
+  // Combine and sort all matches
+  const allMatches = [...markdownMatches, ...urlMatches].sort((a, b) => a.index - b.index);
+  
+  // Build segments
+  allMatches.forEach(match => {
+    // Add text before the link
+    if (match.index > lastIndex) {
+      segments.push({
+        type: 'text',
+        content: text.substring(lastIndex, match.index)
+      });
+    }
+    
+    // Add the link
+    segments.push({
+      type: 'link',
+      text: match.type === 'markdown' ? match.text : match.url,
+      url: match.url
+    });
+    
+    lastIndex = match.index + match.length;
+  });
+  
+  // Add remaining text
+  if (lastIndex < text.length) {
+    segments.push({
+      type: 'text',
+      content: text.substring(lastIndex)
+    });
+  }
+  
+  return segments.length > 0 ? segments : [{ type: 'text', content: text }];
+};
+
+/**
+ * Write text with clickable links to PDF
+ */
+const writeTextWithLinks = (doc, text, options = {}) => {
+  const segments = parseTextWithLinks(text);
+  const defaultOptions = {
+    indent: 0,
+    continued: false,
+    ...options
+  };
+  
+  segments.forEach((segment, index) => {
+    if (segment.type === 'link') {
+      // Write clickable link in blue
+      doc.fillColor('blue')
+        .text(segment.text, {
+          link: segment.url,
+          underline: true,
+          continued: index < segments.length - 1,
+          indent: defaultOptions.indent
+        });
+      doc.fillColor('black'); // Reset color
+    } else {
+      // Write normal text
+      doc.text(segment.content, {
+        continued: index < segments.length - 1,
+        indent: defaultOptions.indent
+      });
+    }
+  });
+};
+
+/**
  * Convert Markdown content to HTML for email display
  */
 const markdownToHtml = (markdownContent) => {
@@ -109,7 +218,7 @@ const generateSummary = (researchContent) => {
 }
 
 /**
- * Generate PDF from research content
+ * Generate PDF from research content with clickable links
  */
 const generatePDF = (researchContent, topic) => {
   return new Promise((resolve, reject) => {
@@ -209,7 +318,7 @@ const generatePDF = (researchContent, topic) => {
           }
           doc.fontSize(12)
             .font('Helvetica')
-            .text(trimmedLine, { indent: 20 })
+          writeTextWithLinks(doc, trimmedLine, { indent: 20 })
         }
         else if (trimmedLine.startsWith('- ') || trimmedLine.startsWith('* ')) {
           if (!isInList) {
@@ -218,7 +327,7 @@ const generatePDF = (researchContent, topic) => {
           }
           doc.fontSize(12)
             .font('Helvetica')
-            .text(`• ${trimmedLine.substring(2)}`, { indent: 20 })
+          writeTextWithLinks(doc, `• ${trimmedLine.substring(2)}`, { indent: 20 })
         }
         else if (trimmedLine === '---' || trimmedLine === '***') {
           doc.moveDown(0.5)
@@ -232,7 +341,7 @@ const generatePDF = (researchContent, topic) => {
         else {
           doc.fontSize(12)
             .font('Helvetica')
-            .text(trimmedLine)
+          writeTextWithLinks(doc, trimmedLine)
           isInList = false
         }
       }
@@ -272,7 +381,7 @@ const generateSummaryParagraph = (combinedMarkdown) => {
 }
 
 /**
- * Generate a combined PDF with ChatGPT and Gemini sections
+ * Generate a combined PDF with ChatGPT and Gemini sections with clickable links
  */
 const generateCombinedPDF = (chatgptContent, geminiContent, topic) => {
   return new Promise((resolve, reject) => {
@@ -339,13 +448,15 @@ const generateCombinedPDF = (chatgptContent, geminiContent, topic) => {
           
           if (/^\d+\.\s/.test(line)) {
             if (!inList) { doc.moveDown(0.2); inList = true }
-            doc.fontSize(11).font('Helvetica').text(line, { indent: 20 })
+            doc.fontSize(11).font('Helvetica')
+            writeTextWithLinks(doc, line, { indent: 20 })
             continue
           }
           
           if (line.startsWith('- ') || line.startsWith('* ')) {
             if (!inList) { doc.moveDown(0.2); inList = true }
-            doc.fontSize(11).font('Helvetica').text(`• ${line.slice(2)}`, { indent: 20 })
+            doc.fontSize(11).font('Helvetica')
+            writeTextWithLinks(doc, `• ${line.slice(2)}`, { indent: 20 })
             continue
           }
           
@@ -360,7 +471,8 @@ const generateCombinedPDF = (chatgptContent, geminiContent, topic) => {
             continue
           }
           
-          doc.fontSize(11).font('Helvetica').text(line)
+          doc.fontSize(11).font('Helvetica')
+          writeTextWithLinks(doc, line)
           inList = false
         }
       }
@@ -434,7 +546,7 @@ export const sendResearchReport = async (userEmail, researchContent, topic) => {
             <h3 style="color: #388e3c; margin-top: 0;">Complete Report</h3>
             <p style="color: #424242; margin: 0;">
               Please find the complete research report attached as a PDF document. 
-              The PDF contains the full formatted report with proper styling and layout.
+              The PDF contains the full formatted report with proper styling and clickable links.
             </p>
           </div>
           
@@ -570,7 +682,7 @@ export const sendCombinedResearchReportSendGrid = async (userEmail, chatgptConte
             <h3 style="color: #388e3c; margin-top: 0;">Complete Report</h3>
             <p style="color: #424242; margin: 0;">
               Please find the complete research report attached as a PDF document. 
-              The PDF contains the full formatted report with proper styling and layout.
+              The PDF contains the full formatted report with proper styling and clickable links for all citations and references.
             </p>
           </div>
           
@@ -582,7 +694,7 @@ export const sendCombinedResearchReportSendGrid = async (userEmail, chatgptConte
           </div>
         </div>
       `,
-      text: `Combined Research Results\n\nResearch Topic: ${topic}\n\nExecutive Summary:\n${summaryParagraph}\n\nChatGPT (OpenAI) Research:\n${chatgptContent}\n\nGemini (Google) Research:\n${geminiContent}\n\nComplete PDF report attached.`,
+      text: `Combined Research Results\n\nResearch Topic: ${topic}\n\nExecutive Summary:\n${summaryParagraph}\n\nChatGPT (OpenAI) Research:\n${chatgptContent}\n\nGemini (Google) Research:\n${geminiContent}\n\nComplete PDF report attached with clickable links.`,
       attachments: [
         {
           content: pdfBuffer.toString('base64'),
