@@ -23,17 +23,24 @@ export class GeminiService {
         throw new Error('GEMINI_API_KEY is not configured')
       }
 
-      const qaContext = (clarifyingQuestions || []).map((q, i) => {
-        const a = (answers && answers[i]) ? answers[i] : 'No answer provided'
-        return `Q${i + 1}: ${q}\nA${i + 1}: ${a}`
-      }).join('\n\n')
+      const qaContext = (clarifyingQuestions && clarifyingQuestions.length > 0) 
+        ? clarifyingQuestions.map((q, i) => {
+            const a = (answers && answers[i]) ? answers[i] : 'No answer provided'
+            return `Q${i + 1}: ${q}\nA${i + 1}: ${a}`
+          }).join('\n\n')
+        : 'No specific clarifying questions were provided. Generate comprehensive research based on the topic itself.';
 
-      const prompt = `You are a research assistant. Create a comprehensive research page based on the original research topic and the clarifying questions and answers provided.
+      const prompt = `You are a research assistant. Create a comprehensive research page based on the original research topic${clarifyingQuestions && clarifyingQuestions.length > 0 ? ' and the clarifying questions and answers provided' : ''}.
 
 Original Research Topic: "${originalTopic}"
 
+${clarifyingQuestions && clarifyingQuestions.length > 0 ? `
 Clarifying Questions and Answers:
 ${qaContext}
+` : `
+Research Context:
+${qaContext}
+`}
 
 Create a well-structured research page that includes:
 1. A refined research question/topic based on the clarifications
@@ -44,12 +51,13 @@ Create a well-structured research page that includes:
 
 IMPORTANT FORMATTING REQUIREMENTS:
 - Use clean, professional formatting
-- Avoid excessive bold formatting (**text**)
+- NEVER use bold formatting (**text** or *text*)
 - Use simple headings with # and ##
 - Make links clean and readable: "Link text (URL)" instead of markdown links
 - Use bullet points with - instead of numbered lists where appropriate
 - Keep paragraphs concise and well-spaced
 - Do not include provider names or headers in the content
+- Avoid ALL markdown formatting except basic headings and bullet points
 
 Format the response in clean markdown.`
 

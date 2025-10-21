@@ -119,19 +119,26 @@ export class OpenAIService {
       console.log('=== OpenAI: Generating research page ===', { originalTopic, clarifyingQuestions, answers, useWebSearch, reasoningLevel });
   
       // Create Q&A context string
-      const qaContext = clarifyingQuestions.map((question, index) => 
-        `Q${index + 1}: ${question}\nA${index + 1}: ${answers[index] || 'No answer provided'}`
-      ).join('\n\n');
+      const qaContext = clarifyingQuestions && clarifyingQuestions.length > 0 
+        ? clarifyingQuestions.map((question, index) => 
+            `Q${index + 1}: ${question}\nA${index + 1}: ${answers[index] || 'No answer provided'}`
+          ).join('\n\n')
+        : `No specific clarifying questions were provided. Generate comprehensive research based on the topic itself.`;
   
       // Define the prompt
       const prompt = `
-  You are an expert research assistant. Using the original research topic and the clarifying questions and answers provided, generate a complete, professional research page.
+  You are an expert research assistant. Using the original research topic${clarifyingQuestions && clarifyingQuestions.length > 0 ? ' and the clarifying questions and answers provided' : ''}, generate a complete, professional research page.
   
   Original Research Topic:
   "${originalTopic}"
   
+  ${clarifyingQuestions && clarifyingQuestions.length > 0 ? `
   Clarifying Questions and Answers:
   ${qaContext}
+  ` : `
+  Research Context:
+  ${qaContext}
+  `}
   
   ${useWebSearch ? `
   IMPORTANT: You have access to web search capabilities. Use them to gather current, authoritative information about this topic. Search for:

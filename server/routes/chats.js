@@ -17,8 +17,16 @@ function cleanResearchContent(content, provider) {
     .replace(new RegExp(`^#+\\s*${provider}[\\s\\n]*`, 'gmi'), '')
     .replace(/^#+\s*Research\s*Page:?\s*/gmi, '')
     .replace(/^#+\s*Comparative\s*Analysis\s*/gmi, '')
-    // Remove extra markdown bold formatting
+    // Remove ALL markdown bold formatting (multiple patterns)
     .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*\*([^*\n]+)\*\*/g, '$1')
+    .replace(/\*\*([^*\n]*?)\*\*/g, '$1')
+    .replace(/\*\*([^*]*?)\*\*/g, '$1')
+    // Remove single asterisk bold formatting
+    .replace(/\*([^*]+)\*/g, '$1')
+    // Remove any remaining asterisks
+    .replace(/\*\*/g, '')
+    .replace(/\*/g, '')
     // Clean up links - make them more readable
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)')
     // Remove extra whitespace and line breaks
@@ -138,7 +146,7 @@ router.post("/:chatId/research-topic", async (req, res) => {
 
       const responseText = `I'd like to help you refine your research topic. To provide you with the most relevant research guidance, I have a few clarifying questions:\n\n${questions
         .map((q, i) => `${i + 1}. ${q}`)
-        .join("\n\n")}\n\nPlease answer these questions one by one, and I'll create a comprehensive research plan for you.`;
+        .join("\n\n")}\n\nPlease answer these questions one by one, and I'll do a comprehensive research for you.`;
 
       await messageQueries.create(chatId, responseText, false);
 
@@ -200,10 +208,20 @@ router.post("/:chatId/clarification-answer", async (req, res) => {
         const cleanedGemini = geminiResult?.success && geminiResult.researchPage 
           ? cleanResearchContent(geminiResult.researchPage, 'Gemini|Google')
           : null;
+        
+        // Additional aggressive cleaning for Gemini content
+        const finalGemini = cleanedGemini ? cleanedGemini
+          .replace(/\*\*([^*]*?)\*\*/g, '$1')
+          .replace(/\*([^*]*?)\*/g, '$1')
+          .replace(/\*\*/g, '')
+          .replace(/\*/g, '')
+          .replace(/\*\*([^*\n]*?)\*\*/g, '$1')
+          .replace(/\*\*([^*]*?)\*\*/g, '$1')
+          : null;
 
         const openaiLabeled = `# ChatGPT (OpenAI) Research\n\n${cleanedOpenAI}`;
-        const geminiLabeled = cleanedGemini 
-          ? `# Gemini (Google) Research\n\n${cleanedGemini}`
+        const geminiLabeled = finalGemini 
+          ? `# Gemini (Google) Research\n\n${finalGemini}`
           : null;
 
         await messageQueries.create(chatId, openaiLabeled, false);
