@@ -79,6 +79,33 @@ const cleanUpCitations = (text) => {
 };
 
 /**
+ * Clean up links that are broken onto new lines within parentheses
+ * AND converts plain text links in parens to markdown links.
+ * e.g. "Text (\nurl.com\n)" becomes "Text [url.com](https://url.com)"
+ */
+const collapseAndLinkify = (text) => {
+  if (!text) return '';
+  // Regex:
+  // \s* - Match optional whitespace (including newlines) *before* the (
+  // \(       - Match a literal opening parenthesis
+  // \s* - Match any whitespace (including newlines) *inside*
+  // (        - Start capture group 1: The URL (e.g., "url.com" or "http://url.com")
+  // [^\s\)]+ - Match one or more characters that are NOT whitespace or a closing parenthesis
+  // )        - End capture group 1
+  // \s* - Match any whitespace (including newlines) *inside*
+  // \)       - Match a literal closing parenthesis
+  return text.replace(/\s*\(\s*([^\s\)]+)\s*\)/g, (match, url) => {
+    let cleanUrl = url;
+    // Add https:// if it's missing
+    if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+      cleanUrl = 'https://' + cleanUrl;
+    }
+    // Return a markdown link, with a leading space
+    return ` [${url}](${cleanUrl})`;
+  });
+};
+
+/**
  * Parse text for URLs and return array of segments with link info
  */
 const parseTextWithLinks = (text) => {
@@ -218,6 +245,8 @@ const markdownToHtml = (markdownContent) => {
   let cleanedContent = removeBoldFormatting(markdownContent);
   // Clean up custom citations first, turning them into standard markdown
   cleanedContent = cleanUpCitations(cleanedContent);
+  // Clean up (url) style links, linkify them, and fix newlines
+  cleanedContent = collapseAndLinkify(cleanedContent);
   
   // ### MODIFICATION HERE ###
   // Find plain URLs and replace them with [hostname](url)
@@ -281,6 +310,7 @@ const markdownToHtml = (markdownContent) => {
 const generateSummary = (researchContent) => {
   let cleanContent = removeBoldFormatting(researchContent);
   cleanContent = cleanUpCitations(cleanContent); // Clean citations
+  cleanContent = collapseAndLinkify(cleanContent); // Clean (url) links
   const lines = cleanContent.split('\n')
   const summary = []
   
@@ -325,6 +355,7 @@ const generatePDF = (researchContent, topic) => {
       // Remove all bold formatting before generating PDF
       let cleanContent = removeBoldFormatting(researchContent);
       cleanContent = cleanUpCitations(cleanContent); // Clean citations
+      cleanContent = collapseAndLinkify(cleanContent); // Clean (url) links
       
       const doc = new PDFDocument({
         size: 'A4',
@@ -477,6 +508,7 @@ const generatePDF = (researchContent, topic) => {
 const generateSummaryParagraph = (combinedMarkdown) => {
   let cleanedMarkdown = removeBoldFormatting(combinedMarkdown);
   cleanedMarkdown = cleanUpCitations(cleanedMarkdown); // Clean citations
+  cleanedMarkdown = collapseAndLinkify(cleanedMarkdown); // Clean (url) links
   const text = cleanedMarkdown
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // Keep text from markdown links
     .replace(/(https?:\/\/[^\s]+)/g, '') // Remove plain URLs
@@ -499,6 +531,10 @@ const generateCombinedPDF = (chatgptContent, geminiContent, topic) => {
       // Clean up custom citations
       cleanChatGPT = cleanUpCitations(cleanChatGPT);
       cleanGemini = cleanUpCitations(cleanGemini);
+      
+      // Clean up (url) style links
+      cleanChatGPT = collapseAndLinkify(cleanChatGPT);
+      cleanGemini = collapseAndLinkify(cleanGemini);
       
       const doc = new PDFDocument({ size: 'A4', margins: { top: 50, bottom: 50, left: 50, right: 50 } })
       const tempDir = path.join(__dirname, '../temp')
@@ -844,3 +880,4 @@ export default {
   sendResearchReport,
   sendCombinedResearchReportSendGrid
 }
+
