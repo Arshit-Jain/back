@@ -57,17 +57,13 @@ const removeBoldFormatting = (text) => {
  */
 const cleanUpCitations = (text) => {
   if (!text) return '';
-  // Regex:
-  // (\n\s*)?             - Capture group 1: Optionally match a newline and spaces *before* the link.
-  // \[([^;\]]+)[^\]]*\]  - Capture group 2: The source text (e.g., "TheWrap")
-  // \s* - Spaces
-  // \(                   - Literal (
-  // ([^\s\()]+)         - Capture group 3: The URL (e.g., "thewrap.com")
-  // [\s\S]*?             - Non-greedily match *all* junk in the middle, including newlines, e.g. " (thewrap.com"
-  // \){1,2}               - Match one or two closing parens, e.g., "))"
+  
+  // Regex 1: The original one for [Source](url)
+  // From: [Source1; Source2] (url.com (url.com
+  // To:   [Source1](https://url.com)
   const citationRegex = /(\n\s*)?\[([^;\]]+)[^\]]*\]\s*\(([^\s\()]+)[\s\S]*?\){1,2}/g;
   
-  return text.replace(citationRegex, (match, newline, source, url) => {
+  let cleanedText = text.replace(citationRegex, (match, newline, source, url) => {
     let cleanUrl = url;
     if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
       cleanUrl = 'https://' + cleanUrl;
@@ -76,7 +72,40 @@ const cleanUpCitations = (text) => {
     // This pulls the link up to the end of the previous paragraph.
     return ` [${source.trim()}](${cleanUrl})`;
   });
+
+  // ### START MODIFICATION ###
+  // Regex 2: Handle the user's specific case from the prompt
+  // From: • Statista (
+  //          statista.com)
+  // To:   • [Statista](https://statista.com)
+  //
+  // Breakdown:
+  // (\n\s*[-•*]\s+) - Group 1: Capture newline, list marker (•, -, *), and space
+  // ([^(\n]+)      - Group 2: Capture link text (anything not a '(' or newline)
+  // \s*\(\s* - Match ' (' and optional space/newline
+  // (\n\s*)?       - Group 3: Optionally capture the newline inside the parens
+  // ([^)\s]+)      - Group 4: Capture the URL (anything not a ')' or space)
+  // [^)]* - Match any remaining junk inside the parens
+  // \)             - Match the final closing paren
+  const messyLinkRegex = /(\n\s*[-•*]\s+)([^(\n]+)\s*\(\s*(\n\s*)?([^)\s]+)[^)]*\)/g;
+  
+  cleanedText = cleanedText.replace(messyLinkRegex, (match, listMarker, source, newline, url) => {
+    // Clean the URL
+    let cleanUrl = url.replace(/[.,]$/, ''); // Remove trailing dots/commas
+    
+    if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+      cleanUrl = 'https://' + cleanUrl;
+    }
+    
+    // Reconstruct the line:
+    // e.g., '\n• ' + '[Statista]' + '(https://statista.com)'
+    return `${listMarker}[${source.trim()}](${cleanUrl})`;
+  });
+  // ### END MODIFICATION ###
+  
+  return cleanedText;
 };
+
 
 /**
  * Parse text for URLs and return array of segments with link info
@@ -838,4 +867,3 @@ export default {
   sendResearchReport,
   sendCombinedResearchReportSendGrid
 }
-
