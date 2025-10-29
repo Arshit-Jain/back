@@ -53,28 +53,28 @@ const removeBoldFormatting = (text) => {
  * Pre-process text to convert custom citation formats into standard markdown links.
  * From: [Source1; Source2] (url.com (url.com
  * To:   [Source1](https://url.com)
+ * This also handles cases where the citation is on a new line, pulling it up.
  */
 const cleanUpCitations = (text) => {
   if (!text) return '';
   // Regex:
-  // \[         - literal [
-  // ([^;\]]+)  - Capture group 1: First source (any char except ; or ])
-  // [^\]]* - Eat rest of the sources inside the brackets
-  // \]         - literal ]
-  // \s* - optional space
-  // \(         - literal (
-  // ([^\s\()]+) - Capture group 2: The URL-like part (any char except space or parens)
-  // [^\)]* - Eat rest of the junk inside the parentheses
-  // \)         - literal )
-  const citationRegex = /\[([^;\]]+)[^\]]*\]\s*\(([^\s\()]+)[^\)]*\)/g;
+  // (\n\s*)?             - Capture group 1: Optionally match a newline and spaces *before* the link.
+  // \[([^;\]]+)[^\]]*\]  - Capture group 2: The source text (e.g., "TheWrap")
+  // \s* - Spaces
+  // \(                   - Literal (
+  // ([^\s\()]+)         - Capture group 3: The URL (e.g., "thewrap.com")
+  // [\s\S]*?             - Non-greedily match *all* junk in the middle, including newlines, e.g. " (thewrap.com"
+  // \){1,2}               - Match one or two closing parens, e.g., "))"
+  const citationRegex = /(\n\s*)?\[([^;\]]+)[^\]]*\]\s*\(([^\s\()]+)[\s\S]*?\){1,2}/g;
   
-  return text.replace(citationRegex, (match, source, url) => {
+  return text.replace(citationRegex, (match, newline, source, url) => {
     let cleanUrl = url;
     if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
       cleanUrl = 'https://' + cleanUrl;
     }
-    // Return a standard markdown link
-    return `[${source.trim()}](${cleanUrl})`;
+    // Replace the entire match (including the preceding newline) with a space and a clean link.
+    // This pulls the link up to the end of the previous paragraph.
+    return ` [${source.trim()}](${cleanUrl})`;
   });
 };
 
