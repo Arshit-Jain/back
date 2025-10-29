@@ -57,46 +57,14 @@ const parseTextWithLinks = (text) => {
   
   const segments = [];
   
-  // Match markdown links [text](url) and plain URLs
+  // Match markdown links [text](url) - this is what we want to convert to clickable links
   const markdownLinkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
-  const urlRegex = /(https?:\/\/[^\s]+)/g;
   
   let lastIndex = 0;
   let match;
   
-  // First, find all markdown links
-  const markdownMatches = [];
+  // Find all markdown links
   while ((match = markdownLinkRegex.exec(text)) !== null) {
-    markdownMatches.push({
-      index: match.index,
-      length: match[0].length,
-      text: match[1],
-      url: match[2],
-      type: 'markdown'
-    });
-  }
-  
-  // Then find plain URLs that aren't part of markdown links
-  const urlMatches = [];
-  let tempText = text;
-  markdownMatches.forEach(m => {
-    tempText = tempText.substring(0, m.index) + ' '.repeat(m.length) + tempText.substring(m.index + m.length);
-  });
-  
-  while ((match = urlRegex.exec(tempText)) !== null) {
-    urlMatches.push({
-      index: match.index,
-      length: match[0].length,
-      url: match[1],
-      type: 'plain'
-    });
-  }
-  
-  // Combine and sort all matches
-  const allMatches = [...markdownMatches, ...urlMatches].sort((a, b) => a.index - b.index);
-  
-  // Build segments
-  allMatches.forEach(match => {
     // Add text before the link
     if (match.index > lastIndex) {
       segments.push({
@@ -105,15 +73,15 @@ const parseTextWithLinks = (text) => {
       });
     }
     
-    // Add the link
+    // Add the link with just the display text (not the URL)
     segments.push({
       type: 'link',
-      text: match.type === 'markdown' ? match.text : match.url,
-      url: match.url
+      text: match[1], // Just the link text (e.g., "YouTube Blog")
+      url: match[2]   // The actual URL
     });
     
-    lastIndex = match.index + match.length;
-  });
+    lastIndex = match.index + match[0].length;
+  }
   
   // Add remaining text
   if (lastIndex < text.length) {
@@ -159,7 +127,7 @@ const writeTextWithLinks = (doc, text, options = {}) => {
 };
 
 /**
- * Convert Markdown content to HTML for email display
+ * Convert Markdown content to HTML for email display with clean clickable links
  */
 const markdownToHtml = (markdownContent) => {
   if (!markdownContent) return ''
@@ -167,14 +135,22 @@ const markdownToHtml = (markdownContent) => {
   // Remove bold formatting before converting
   const cleanedContent = removeBoldFormatting(markdownContent);
   
-  // Configure marked options for better email rendering
+  // Configure marked with custom renderer for links
+  const renderer = new marked.Renderer();
+  
+  // Override link rendering to show just the link text as clickable
+  renderer.link = (href, title, text) => {
+    return `<a href="${href}" style="color: #007bff; text-decoration: none;">${text}</a>`;
+  };
+  
   marked.setOptions({
     breaks: true,
     gfm: true,
-    sanitize: false
-  })
+    sanitize: false,
+    renderer: renderer
+  });
   
-  return marked.parse(cleanedContent)
+  return marked.parse(cleanedContent);
 }
 
 /**
