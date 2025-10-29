@@ -50,14 +50,24 @@ const removeBoldFormatting = (text) => {
 };
 
 /**
- * Parse text for URLs and return array of segments with link info
+ * Convert markdown links to HTML clickable links for email display
+ */
+const convertMarkdownLinksToHtml = (text) => {
+  if (!text) return '';
+  
+  // Convert [text](url) to <a href="url">text</a>
+  return text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="color: #007bff; text-decoration: none;">$1</a>');
+};
+
+/**
+ * Parse text for URLs and return array of segments with link info for PDF
  */
 const parseTextWithLinks = (text) => {
   if (!text) return [];
   
   const segments = [];
   
-  // Match markdown links [text](url) - this is what we want to convert to clickable links
+  // Match markdown links [text](url)
   const markdownLinkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
   
   let lastIndex = 0;
@@ -135,10 +145,13 @@ const markdownToHtml = (markdownContent) => {
   // Remove bold formatting before converting
   const cleanedContent = removeBoldFormatting(markdownContent);
   
-  // Configure marked with custom renderer for links
+  // First, convert markdown links to HTML links before marked processes them
+  const contentWithLinks = convertMarkdownLinksToHtml(cleanedContent);
+  
+  // Configure marked with custom renderer
   const renderer = new marked.Renderer();
   
-  // Override link rendering to show just the link text as clickable
+  // Override link rendering to ensure clean clickable links
   renderer.link = (href, title, text) => {
     return `<a href="${href}" style="color: #007bff; text-decoration: none;">${text}</a>`;
   };
@@ -150,11 +163,11 @@ const markdownToHtml = (markdownContent) => {
     renderer: renderer
   });
   
-  return marked.parse(cleanedContent);
-}
+  return marked.parse(contentWithLinks);
+};
 
 /**
- * Generate a summary of the research report
+ * Generate a summary of the research report with clean clickable links
  */
 const generateSummary = (researchContent) => {
   const cleanContent = removeBoldFormatting(researchContent);
@@ -190,8 +203,10 @@ const generateSummary = (researchContent) => {
     summary.push(`${currentSection}: ${keyPoints.slice(0, 3).join('; ')}`)
   }
   
-  return summary.join('\n\n')
-}
+  // Convert markdown links to HTML for email display
+  const summaryText = summary.join('\n\n');
+  return convertMarkdownLinksToHtml(summaryText);
+};
 
 /**
  * Generate PDF from research content with clickable links
@@ -345,7 +360,7 @@ const generatePDF = (researchContent, topic) => {
 }
 
 /**
- * Generate a short paragraph summary from combined markdown
+ * Generate a short paragraph summary from combined markdown with clean links
  */
 const generateSummaryParagraph = (combinedMarkdown) => {
   const cleanedMarkdown = removeBoldFormatting(combinedMarkdown);
@@ -353,7 +368,10 @@ const generateSummaryParagraph = (combinedMarkdown) => {
     .replace(/[#*_`>-]/g, '')
     .replace(/\n+/g, ' ')
     .trim()
-  return text.length > 650 ? text.slice(0, 640) + '…' : text
+  const summary = text.length > 650 ? text.slice(0, 640) + '…' : text;
+  
+  // Convert markdown links to HTML for email display
+  return convertMarkdownLinksToHtml(summary);
 }
 
 /**
@@ -607,7 +625,7 @@ export const sendCombinedResearchReportSendGrid = async (userEmail, chatgptConte
     try {
       const sum = await GeminiService.summarizeCombinedReport(combinedMarkdown)
       if (sum.success && sum.summary) {
-        summaryParagraph = sum.summary
+        summaryParagraph = convertMarkdownLinksToHtml(sum.summary)
       } else {
         summaryParagraph = generateSummaryParagraph(combinedMarkdown)
       }
