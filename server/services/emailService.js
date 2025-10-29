@@ -101,6 +101,21 @@ const cleanUpCitations = (text) => {
     // e.g., '\n• ' + '[Statista]' + '(https://statista.com)'
     return `${listMarker}[${source.trim()}](${cleanUrl})`;
   });
+  
+  // ### NEW REGEX FOR CHATGPT-STYLE LINKS ###
+  // From: • [Some text [Source] more text](url)
+  // To:   • Some text [Source](https://url) more text
+  // This handles links where the source is bracketed *inside* the main link text.
+  const chatGptRegex = /\[([\s\S]*?)\[([^\]]+)\]([\s\S]*?)\]\(\s*([^\s)]+)\s*\)/g;
+  
+  cleanedText = cleanedText.replace(chatGptRegex, (match, prefix, source, suffix, url) => {
+    let cleanUrl = url;
+    if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+      cleanUrl = 'https://' + cleanUrl;
+    }
+    // Reconstruct the line, removing the outer brackets and attaching the link to the inner source
+    return `${prefix}[${source}](${cleanUrl})${suffix}`;
+  });
   // ### END MODIFICATION ###
   
   return cleanedText;
@@ -867,3 +882,4 @@ export default {
   sendResearchReport,
   sendCombinedResearchReportSendGrid
 }
+
