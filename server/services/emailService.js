@@ -50,31 +50,53 @@ const removeBoldFormatting = (text) => {
 };
 
 /**
- * Convert markdown links to HTML clickable links for email display
- */
-const convertMarkdownLinksToHtml = (text) => {
-  if (!text) return '';
-  
-  // Convert [text](url) to <a href="url">text</a>
-  return text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="color: #007bff; text-decoration: none;">$1</a>');
-};
-
-/**
- * Parse text for URLs and return array of segments with link info for PDF
+ * Parse text for URLs and return array of segments with link info
  */
 const parseTextWithLinks = (text) => {
   if (!text) return [];
   
   const segments = [];
   
-  // Match markdown links [text](url)
+  // Match markdown links [text](url) and plain URLs
   const markdownLinkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
   
   let lastIndex = 0;
   let match;
   
-  // Find all markdown links
+  // First, find all markdown links
+  const markdownMatches = [];
   while ((match = markdownLinkRegex.exec(text)) !== null) {
+    markdownMatches.push({
+      index: match.index,
+      length: match[0].length,
+      text: match[1],
+      url: match[2],
+      type: 'markdown'
+    });
+  }
+  
+  // Then find plain URLs that aren't part of markdown links
+  const urlMatches = [];
+  let tempText = text;
+  markdownMatches.forEach(m => {
+    tempText = tempText.substring(0, m.index) + ' '.repeat(m.length) + tempText.substring(m.index + m.length);
+  });
+  
+  while ((match = urlRegex.exec(tempText)) !== null) {
+    urlMatches.push({
+      index: match.index,
+      length: match[0].length,
+      url: match[1],
+      type: 'plain'
+    });
+  }
+  
+  // Combine and sort all matches
+  const allMatches = [...markdownMatches, ...urlMatches].sort((a, b) => a.index - b.index);
+  
+  // Build segments
+  allMatches.forEach(match => {
     // Add text before the link
     if (match.index > lastIndex) {
       segments.push({
@@ -83,15 +105,15 @@ const parseTextWithLinks = (text) => {
       });
     }
     
-    // Add the link with just the display text (not the URL)
+    // Add the link
     segments.push({
       type: 'link',
-      text: match[1], // Just the link text (e.g., "YouTube Blog")
-      url: match[2]   // The actual URL
+      text: match.type === 'markdown' ? match.text : match.url,
+      url: match.url
     });
     
-    lastIndex = match.index + match[0].length;
-  }
+    lastIndex = match.index + match.length;
+  });
   
   // Add remaining text
   if (lastIndex < text.length) {
@@ -137,7 +159,7 @@ const writeTextWithLinks = (doc, text, options = {}) => {
 };
 
 /**
- * Convert Markdown content to HTML for email display with clean clickable links
+ * Convert Markdown content to HTML for email display
  */
 const markdownToHtml = (markdownContent) => {
   if (!markdownContent) return ''
@@ -145,29 +167,18 @@ const markdownToHtml = (markdownContent) => {
   // Remove bold formatting before converting
   const cleanedContent = removeBoldFormatting(markdownContent);
   
-  // First, convert markdown links to HTML links before marked processes them
-  const contentWithLinks = convertMarkdownLinksToHtml(cleanedContent);
-  
-  // Configure marked with custom renderer
-  const renderer = new marked.Renderer();
-  
-  // Override link rendering to ensure clean clickable links
-  renderer.link = (href, title, text) => {
-    return `<a href="${href}" style="color: #007bff; text-decoration: none;">${text}</a>`;
-  };
-  
+  // Configure marked options for better email rendering
   marked.setOptions({
     breaks: true,
     gfm: true,
-    sanitize: false,
-    renderer: renderer
-  });
+    sanitize: false
+  })
   
-  return marked.parse(contentWithLinks);
-};
+  return marked.parse(cleanedContent)
+}
 
 /**
- * Generate a summary of the research report with clean clickable links
+ * Generate a summary of the research report
  */
 const generateSummary = (researchContent) => {
   const cleanContent = removeBoldFormatting(researchContent);
@@ -203,10 +214,8 @@ const generateSummary = (researchContent) => {
     summary.push(`${currentSection}: ${keyPoints.slice(0, 3).join('; ')}`)
   }
   
-  // Convert markdown links to HTML for email display
-  const summaryText = summary.join('\n\n');
-  return convertMarkdownLinksToHtml(summaryText);
-};
+  return summary.join('\n\n')
+}
 
 /**
  * Generate PDF from research content with clickable links
@@ -360,7 +369,7 @@ const generatePDF = (researchContent, topic) => {
 }
 
 /**
- * Generate a short paragraph summary from combined markdown with clean links
+ * Generate a short paragraph summary from combined markdown
  */
 const generateSummaryParagraph = (combinedMarkdown) => {
   const cleanedMarkdown = removeBoldFormatting(combinedMarkdown);
@@ -368,10 +377,7 @@ const generateSummaryParagraph = (combinedMarkdown) => {
     .replace(/[#*_`>-]/g, '')
     .replace(/\n+/g, ' ')
     .trim()
-  const summary = text.length > 650 ? text.slice(0, 640) + '…' : text;
-  
-  // Convert markdown links to HTML for email display
-  return convertMarkdownLinksToHtml(summary);
+  return text.length > 650 ? text.slice(0, 640) + '…' : text
 }
 
 /**
@@ -625,7 +631,7 @@ export const sendCombinedResearchReportSendGrid = async (userEmail, chatgptConte
     try {
       const sum = await GeminiService.summarizeCombinedReport(combinedMarkdown)
       if (sum.success && sum.summary) {
-        summaryParagraph = convertMarkdownLinksToHtml(sum.summary)
+        summaryParagraph = sum.summary
       } else {
         summaryParagraph = generateSummaryParagraph(combinedMarkdown)
       }
