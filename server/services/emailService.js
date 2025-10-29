@@ -57,13 +57,17 @@ const removeBoldFormatting = (text) => {
  */
 const cleanUpCitations = (text) => {
   if (!text) return '';
-  
-  // Regex 1: The original one for [Source](url)
-  // From: [Source1; Source2] (url.com (url.com
-  // To:   [Source1](https://url.com)
+  // Regex:
+  // (\n\s*)?             - Capture group 1: Optionally match a newline and spaces *before* the link.
+  // \[([^;\]]+)[^\]]*\]  - Capture group 2: The source text (e.g., "TheWrap")
+  // \s* - Spaces
+  // \(                   - Literal (
+  // ([^\s\()]+)         - Capture group 3: The URL (e.g., "thewrap.com")
+  // [\s\S]*?             - Non-greedily match *all* junk in the middle, including newlines, e.g. " (thewrap.com"
+  // \){1,2}               - Match one or two closing parens, e.g., "))"
   const citationRegex = /(\n\s*)?\[([^;\]]+)[^\]]*\]\s*\(([^\s\()]+)[\s\S]*?\){1,2}/g;
   
-  let cleanedText = text.replace(citationRegex, (match, newline, source, url) => {
+  return text.replace(citationRegex, (match, newline, source, url) => {
     let cleanUrl = url;
     if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
       cleanUrl = 'https://' + cleanUrl;
@@ -72,55 +76,7 @@ const cleanUpCitations = (text) => {
     // This pulls the link up to the end of the previous paragraph.
     return ` [${source.trim()}](${cleanUrl})`;
   });
-
-  // ### START MODIFICATION ###
-  // Regex 2: Handle the user's specific case from the prompt
-  // From: • Statista (
-  //          statista.com)
-  // To:   • [Statista](https://statista.com)
-  //
-  // Breakdown:
-  // (\n\s*[-•*]\s+) - Group 1: Capture newline, list marker (•, -, *), and space
-  // ([^(\n]+)      - Group 2: Capture link text (anything not a '(' or newline)
-  // \s*\(\s* - Match ' (' and optional space/newline
-  // (\n\s*)?       - Group 3: Optionally capture the newline inside the parens
-  // ([^)\s]+)      - Group 4: Capture the URL (anything not a ')' or space)
-  // [^)]* - Match any remaining junk inside the parens
-  // \)             - Match the final closing paren
-  const messyLinkRegex = /(\n\s*[-•*]\s+)([^(\n]+)\s*\(\s*(\n\s*)?([^)\s]+)[^)]*\)/g;
-  
-  cleanedText = cleanedText.replace(messyLinkRegex, (match, listMarker, source, newline, url) => {
-    // Clean the URL
-    let cleanUrl = url.replace(/[.,]$/, ''); // Remove trailing dots/commas
-    
-    if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
-      cleanUrl = 'https://' + cleanUrl;
-    }
-    
-    // Reconstruct the line:
-    // e.g., '\n• ' + '[Statista]' + '(https://statista.com)'
-    return `${listMarker}[${source.trim()}](${cleanUrl})`;
-  });
-  
-  // ### NEW REGEX FOR CHATGPT-STYLE LINKS ###
-  // From: • [Some text [Source] more text](url)
-  // To:   • Some text [Source](https://url) more text
-  // This handles links where the source is bracketed *inside* the main link text.
-  const chatGptRegex = /\[([\s\S]*?)\[([^\]]+)\]([\s\S]*?)\]\(\s*([^\s)]+)\s*\)/g;
-  
-  cleanedText = cleanedText.replace(chatGptRegex, (match, prefix, source, suffix, url) => {
-    let cleanUrl = url;
-    if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
-      cleanUrl = 'https://' + cleanUrl;
-    }
-    // Reconstruct the line, removing the outer brackets and attaching the link to the inner source
-    return `${prefix}[${source}](${cleanUrl})${suffix}`;
-  });
-  // ### END MODIFICATION ###
-  
-  return cleanedText;
 };
-
 
 /**
  * Parse text for URLs and return array of segments with link info
@@ -672,6 +628,8 @@ export const sendResearchReport = async (userEmail, researchContent, topic) => {
     const pdfBuffer = fs.readFileSync(filePath)
     // markdownToHtml will now handle link formatting
     const researchHtml = markdownToHtml(researchContent)
+    // ### FIX: Run the summary through the markdown parser as well ###
+    const summaryHtml = markdownToHtml(summary)
     
     const emailContent = {
       to: userEmail,
@@ -689,7 +647,8 @@ export const sendResearchReport = async (userEmail, researchContent, topic) => {
           <div style="background-color: #e3f2fd; padding: 20px; border-radius: 8px; margin: 20px 0;">
             <h3 style="color: #1976d2; margin-top: 0;">Executive Summary</h3>
             <div style="white-space: pre-line; line-height: 1.6; color: #424242;">
-              ${summary}
+              <!-- ### FIX: Use the parsed summaryHtml instead of summary ### -->
+              ${summaryHtml}
             </div>
           </div>
           
@@ -801,9 +760,11 @@ export const sendCombinedResearchReportSendGrid = async (userEmail, chatgptConte
     filePath = pdf.filePath
     const pdfBuffer = fs.readFileSync(filePath)
 
-    // markdownToHtml will now handle link formatting for both
+    // markdownToHtml will now handle link formatting for all
     const chatgptHtml = markdownToHtml(chatgptContent)
     const geminiHtml = markdownToHtml(geminiContent)
+    // ### FIX: Run the summary paragraph through the markdown parser as well ###
+    const summaryHtml = markdownToHtml(summaryParagraph)
     
     const emailContent = {
       to: userEmail,
@@ -820,7 +781,8 @@ export const sendCombinedResearchReportSendGrid = async (userEmail, chatgptConte
           
           <div style="background-color: #e3f2fd; padding: 20px; border-radius: 8px; margin: 20px 0;">
             <h3 style="color: #1976d2; margin-top: 0;">Executive Summary</h3>
-            <div style="color: #424242; white-space: pre-wrap; word-wrap: break-word;">${summaryParagraph}</div>
+            <!-- ### FIX: Use the parsed summaryHtml instead of summaryParagraph ### -->
+            <div style="color: #424242; white-space: pre-wrap; word-wrap: break-word;">${summaryHtml}</div>
           </div>
           
           <div style="margin: 30px 0;">
@@ -882,4 +844,3 @@ export default {
   sendResearchReport,
   sendCombinedResearchReportSendGrid
 }
-
