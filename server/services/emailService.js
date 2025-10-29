@@ -50,6 +50,35 @@ const removeBoldFormatting = (text) => {
 };
 
 /**
+ * Pre-process text to convert custom citation formats into standard markdown links.
+ * From: [Source1; Source2] (url.com (url.com
+ * To:   [Source1](https://url.com)
+ */
+const cleanUpCitations = (text) => {
+  if (!text) return '';
+  // Regex:
+  // \[         - literal [
+  // ([^;\]]+)  - Capture group 1: First source (any char except ; or ])
+  // [^\]]* - Eat rest of the sources inside the brackets
+  // \]         - literal ]
+  // \s* - optional space
+  // \(         - literal (
+  // ([^\s\()]+) - Capture group 2: The URL-like part (any char except space or parens)
+  // [^\)]* - Eat rest of the junk inside the parentheses
+  // \)         - literal )
+  const citationRegex = /\[([^;\]]+)[^\]]*\]\s*\(([^\s\()]+)[^\)]*\)/g;
+  
+  return text.replace(citationRegex, (match, source, url) => {
+    let cleanUrl = url;
+    if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+      cleanUrl = 'https://' + cleanUrl;
+    }
+    // Return a standard markdown link
+    return `[${source.trim()}](${cleanUrl})`;
+  });
+};
+
+/**
  * Parse text for URLs and return array of segments with link info
  */
 const parseTextWithLinks = (text) => {
@@ -187,6 +216,8 @@ const markdownToHtml = (markdownContent) => {
   if (!markdownContent) return ''
   
   let cleanedContent = removeBoldFormatting(markdownContent);
+  // Clean up custom citations first, turning them into standard markdown
+  cleanedContent = cleanUpCitations(cleanedContent);
   
   // ### MODIFICATION HERE ###
   // Find plain URLs and replace them with [hostname](url)
@@ -248,7 +279,8 @@ const markdownToHtml = (markdownContent) => {
  * Generate a summary of the research report
  */
 const generateSummary = (researchContent) => {
-  const cleanContent = removeBoldFormatting(researchContent);
+  let cleanContent = removeBoldFormatting(researchContent);
+  cleanContent = cleanUpCitations(cleanContent); // Clean citations
   const lines = cleanContent.split('\n')
   const summary = []
   
@@ -291,7 +323,8 @@ const generatePDF = (researchContent, topic) => {
   return new Promise((resolve, reject) => {
     try {
       // Remove all bold formatting before generating PDF
-      const cleanContent = removeBoldFormatting(researchContent);
+      let cleanContent = removeBoldFormatting(researchContent);
+      cleanContent = cleanUpCitations(cleanContent); // Clean citations
       
       const doc = new PDFDocument({
         size: 'A4',
@@ -442,7 +475,8 @@ const generatePDF = (researchContent, topic) => {
  * Generate a short paragraph summary from combined markdown
  */
 const generateSummaryParagraph = (combinedMarkdown) => {
-  const cleanedMarkdown = removeBoldFormatting(combinedMarkdown);
+  let cleanedMarkdown = removeBoldFormatting(combinedMarkdown);
+  cleanedMarkdown = cleanUpCitations(cleanedMarkdown); // Clean citations
   const text = cleanedMarkdown
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // Keep text from markdown links
     .replace(/(https?:\/\/[^\s]+)/g, '') // Remove plain URLs
@@ -459,8 +493,12 @@ const generateCombinedPDF = (chatgptContent, geminiContent, topic) => {
   return new Promise((resolve, reject) => {
     try {
       // Remove all bold formatting from both contents
-      const cleanChatGPT = removeBoldFormatting(chatgptContent);
-      const cleanGemini = removeBoldFormatting(geminiContent);
+      let cleanChatGPT = removeBoldFormatting(chatgptContent);
+      let cleanGemini = removeBoldFormatting(geminiContent);
+      
+      // Clean up custom citations
+      cleanChatGPT = cleanUpCitations(cleanChatGPT);
+      cleanGemini = cleanUpCitations(cleanGemini);
       
       const doc = new PDFDocument({ size: 'A4', margins: { top: 50, bottom: 50, left: 50, right: 50 } })
       const tempDir = path.join(__dirname, '../temp')
@@ -800,3 +838,4 @@ export default {
   sendResearchReport,
   sendCombinedResearchReportSendGrid
 }
+
