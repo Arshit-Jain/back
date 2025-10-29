@@ -84,6 +84,10 @@ const parseTextWithLinks = (text) => {
   });
   
   while ((match = urlRegex.exec(tempText)) !== null) {
+    // Avoid matching URLs that are part of image markdown ![]()
+    if (tempText.substring(match.index - 2, match.index) === '!](') {
+      continue;
+    }
     urlMatches.push({
       index: match.index,
       length: match[0].length,
@@ -105,12 +109,28 @@ const parseTextWithLinks = (text) => {
       });
     }
     
+    // ### MODIFICATION HERE ###
+    // Determine the link text
+    let linkText = match.url; // Default
+    if (match.type === 'markdown') {
+      linkText = match.text; // Use text from [text](url)
+    } else {
+      // For plain URLs, use the hostname
+      try {
+        const urlObj = new URL(match.url);
+        linkText = urlObj.hostname.replace(/^www\./, ''); // e.g., "cnbc.com"
+      } catch (e) {
+        linkText = match.url; // Fallback
+      }
+    }
+    
     // Add the link
     segments.push({
       type: 'link',
-      text: match.type === 'markdown' ? match.text : match.url,
+      text: linkText, // Use the new linkText
       url: match.url
     });
+    // ### END MODIFICATION ###
     
     lastIndex = match.index + match.length;
   });
@@ -138,22 +158,24 @@ const writeTextWithLinks = (doc, text, options = {}) => {
   };
   
   segments.forEach((segment, index) => {
+    const isLastSegment = index === segments.length - 1;
+    const segmentOptions = {
+        ...defaultOptions,
+        continued: !isLastSegment && defaultOptions.continued !== false, // Only continue if not last segment
+    };
+    
     if (segment.type === 'link') {
       // Write clickable link in blue
       doc.fillColor('blue')
         .text(segment.text, {
+          ...segmentOptions,
           link: segment.url,
           underline: true,
-          continued: index < segments.length - 1,
-          indent: defaultOptions.indent
         });
       doc.fillColor('black'); // Reset color
     } else {
       // Write normal text
-      doc.text(segment.content, {
-        continued: index < segments.length - 1,
-        indent: defaultOptions.indent
-      });
+      doc.text(segment.content, segmentOptions);
     }
   });
 };
@@ -164,9 +186,53 @@ const writeTextWithLinks = (doc, text, options = {}) => {
 const markdownToHtml = (markdownContent) => {
   if (!markdownContent) return ''
   
-  // Remove bold formatting before converting
-  const cleanedContent = removeBoldFormatting(markdownContent);
+  let cleanedContent = removeBoldFormatting(markdownContent);
   
+  // ### MODIFICATION HERE ###
+  // Find plain URLs and replace them with [hostname](url)
+  // This makes them render cleanly in the email.
+  
+  let tempText = cleanedContent;
+  const mdLinks = [];
+  let match;
+  // Regex for markdown links
+  const markdownLinkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
+  while ((match = markdownLinkRegex.exec(cleanedContent)) !== null) {
+    mdLinks.push({ index: match.index, length: match[0].length });
+  }
+
+  // Create a "mask" of the string where markdown links are
+  mdLinks.forEach(m => {
+    tempText = tempText.substring(0, m.index) + ' '.repeat(m.length) + tempText.substring(m.index + m.length);
+  });
+  
+  // Now, find plain URLs in the masked string
+  const plainUrls = [];
+  // Regex for plain URLs
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  while ((match = urlRegex.exec(tempText)) !== null) {
+     // Avoid matching URLs that are part of image markdown ![]()
+    if (tempText.substring(match.index - 2, match.index) === '!](') {
+      continue;
+    }
+    plainUrls.push({ index: match.index, url: match[0] });
+  }
+
+  // Go backwards to replace plain URLs in the *original* string
+  // without messing up indices
+  for (let i = plainUrls.length - 1; i >= 0; i--) {
+    const { index, url } = plainUrls[i];
+    try {
+      const urlObj = new URL(url);
+      const hostname = urlObj.hostname.replace(/^www\./, '');
+      const mdLink = `[${hostname}](${url})`; // Convert to markdown link
+      cleanedContent = cleanedContent.substring(0, index) + mdLink + cleanedContent.substring(index + url.length);
+    } catch (e) {
+      // ignore invalid URL, leave as is
+    }
+  }
+  // ### END MODIFICATION ###
+
   // Configure marked options for better email rendering
   marked.setOptions({
     breaks: true,
@@ -174,6 +240,7 @@ const markdownToHtml = (markdownContent) => {
     sanitize: false
   })
   
+  // Now parse the modified markdown
   return marked.parse(cleanedContent)
 }
 
@@ -318,6 +385,7 @@ const generatePDF = (researchContent, topic) => {
           }
           doc.fontSize(12)
             .font('Helvetica')
+          // Use writeTextWithLinks for list items
           writeTextWithLinks(doc, trimmedLine, { indent: 20 })
         }
         else if (trimmedLine.startsWith('- ') || trimmedLine.startsWith('* ')) {
@@ -327,6 +395,7 @@ const generatePDF = (researchContent, topic) => {
           }
           doc.fontSize(12)
             .font('Helvetica')
+          // Use writeTextWithLinks for list items
           writeTextWithLinks(doc, `• ${trimmedLine.substring(2)}`, { indent: 20 })
         }
         else if (trimmedLine === '---' || trimmedLine === '***') {
@@ -341,6 +410,7 @@ const generatePDF = (researchContent, topic) => {
         else {
           doc.fontSize(12)
             .font('Helvetica')
+          // Use writeTextWithLinks for regular paragraphs
           writeTextWithLinks(doc, trimmedLine)
           isInList = false
         }
@@ -374,6 +444,8 @@ const generatePDF = (researchContent, topic) => {
 const generateSummaryParagraph = (combinedMarkdown) => {
   const cleanedMarkdown = removeBoldFormatting(combinedMarkdown);
   const text = cleanedMarkdown
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1') // Keep text from markdown links
+    .replace(/(https?:\/\/[^\s]+)/g, '') // Remove plain URLs
     .replace(/[#*_`>-]/g, '')
     .replace(/\n+/g, ' ')
     .trim()
@@ -449,6 +521,7 @@ const generateCombinedPDF = (chatgptContent, geminiContent, topic) => {
           if (/^\d+\.\s/.test(line)) {
             if (!inList) { doc.moveDown(0.2); inList = true }
             doc.fontSize(11).font('Helvetica')
+            // Use writeTextWithLinks for list items
             writeTextWithLinks(doc, line, { indent: 20 })
             continue
           }
@@ -456,6 +529,7 @@ const generateCombinedPDF = (chatgptContent, geminiContent, topic) => {
           if (line.startsWith('- ') || line.startsWith('* ')) {
             if (!inList) { doc.moveDown(0.2); inList = true }
             doc.fontSize(11).font('Helvetica')
+            // Use writeTextWithLinks for list items
             writeTextWithLinks(doc, `• ${line.slice(2)}`, { indent: 20 })
             continue
           }
@@ -472,6 +546,7 @@ const generateCombinedPDF = (chatgptContent, geminiContent, topic) => {
           }
           
           doc.fontSize(11).font('Helvetica')
+          // Use writeTextWithLinks for regular paragraphs
           writeTextWithLinks(doc, line)
           inList = false
         }
@@ -513,6 +588,7 @@ export const sendResearchReport = async (userEmail, researchContent, topic) => {
     console.log('=== Email Service: PDF generated ===', { fileName })
     
     const pdfBuffer = fs.readFileSync(filePath)
+    // markdownToHtml will now handle link formatting
     const researchHtml = markdownToHtml(researchContent)
     
     const emailContent = {
@@ -537,7 +613,7 @@ export const sendResearchReport = async (userEmail, researchContent, topic) => {
           
           <div style="margin: 30px 0;">
             <h3 style="color: #333; margin: 20px 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #007bff;">Research Report</h3>
-            <div style="background-color: #fafafa; padding: 20px; border-radius: 8px; border-left: 4px solid #007bff;">
+            <div style="background-color: #fafafa; padding: 20px; border-radius: 8px; border-left: 4px solid #007bff; word-wrap: break-word;">
               ${researchHtml}
             </div>
           </div>
@@ -643,6 +719,7 @@ export const sendCombinedResearchReportSendGrid = async (userEmail, chatgptConte
     filePath = pdf.filePath
     const pdfBuffer = fs.readFileSync(filePath)
 
+    // markdownToHtml will now handle link formatting for both
     const chatgptHtml = markdownToHtml(chatgptContent)
     const geminiHtml = markdownToHtml(geminiContent)
     
@@ -661,19 +738,19 @@ export const sendCombinedResearchReportSendGrid = async (userEmail, chatgptConte
           
           <div style="background-color: #e3f2fd; padding: 20px; border-radius: 8px; margin: 20px 0;">
             <h3 style="color: #1976d2; margin-top: 0;">Executive Summary</h3>
-            <div style="color: #424242; white-space: pre-wrap;">${summaryParagraph}</div>
+            <div style="color: #424242; white-space: pre-wrap; word-wrap: break-word;">${summaryParagraph}</div>
           </div>
           
           <div style="margin: 30px 0;">
             <h3 style="color: #333; margin: 20px 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #007bff;">ChatGPT (OpenAI) Research</h3>
-            <div style="background-color: #fafafa; padding: 20px; border-radius: 8px; border-left: 4px solid #007bff;">
+            <div style="background-color: #fafafa; padding: 20px; border-radius: 8px; border-left: 4px solid #007bff; word-wrap: break-word;">
               ${chatgptHtml}
             </div>
           </div>
           
           <div style="margin: 30px 0;">
             <h3 style="color: #333; margin: 20px 0 15px 0; padding-bottom: 10px; border-bottom: 2px solid #4285f4;">Gemini (Google) Research</h3>
-            <div style="background-color: #fafafa; padding: 20px; border-radius: 8px; border-left: 4px solid #4285f4;">
+            <div style="background-color: #fafafa; padding: 20px; border-radius: 8px; border-left: 4px solid #4285f4; word-wrap: break-word;">
               ${geminiHtml}
             </div>
           </div>
