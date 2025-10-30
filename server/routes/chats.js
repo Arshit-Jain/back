@@ -161,9 +161,9 @@ router.post("/:chatId/research-topic", async (req, res) => {
       const questions = result.questions;
       await chatQueries.updateTitle(chatId, generatedTitle);
 
-      const responseText = `I'd like to help you refine your research topic. To provide you with the most relevant research guidance, I have a few clarifying questions:\n\n${questions
-        .map((q, i) => `${i + 1}. ${q}`)
-        .join("\n\n")}\n\nPlease answer these questions one by one, and I'll do a comprehensive research for you.`;
+      // Only show the FIRST question to the user
+      const firstQuestion = questions[0];
+      const responseText = `I'd like to help you refine your research topic. To provide you with the most relevant research guidance, I have a clarifying question:\n\n${firstQuestion}\n\nPlease answer this question, and I'll do a comprehensive research for you.`;
 
       await messageQueries.create(chatId, responseText, false);
 
@@ -171,7 +171,7 @@ router.post("/:chatId/research-topic", async (req, res) => {
         success: true,
         response: responseText,
         messageType: "clarifying_questions",
-        questions,
+        questions, // Still send all questions to frontend for state management
         title: generatedTitle,
       });
     } else {
@@ -273,8 +273,9 @@ router.post("/:chatId/clarification-answer", async (req, res) => {
         res.json({ success: true, response: errorResponse });
       }
     } else {
-      // More questions to answer
-      const responseText = `Thank you for your answer. Please answer the next question.`;
+      // More questions to answer - show the NEXT question
+      const nextQuestion = questions[questionIndex + 1];
+      const responseText = `Thank you for your answer. Here's my next question:\n\n${nextQuestion}`;
       await messageQueries.create(chatId, responseText, false);
       res.json({
         success: true,
