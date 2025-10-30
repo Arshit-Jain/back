@@ -137,7 +137,6 @@ router.get("/:chatId/messages", async (req, res) => {
 });
 
 // ===== Start research topic =====
-
 router.post("/:chatId/research-topic", async (req, res) => {
   try {
     const { chatId } = req.params
@@ -160,20 +159,18 @@ router.post("/:chatId/research-topic", async (req, res) => {
       const questions = result.questions
       await chatQueries.updateTitle(chatId, generatedTitle)
       
-      // --- START CHANGE: Simplified Initial Response ---
-      // Change the response text to only be the introductory sentence
-      const responseText = `I want to ask a few refine questions.`
-      // --- END CHANGE ---
+      // ✅ FIXED: Return a proper intro message that will be stored in DB
+      const introMessage = `I want to ask a few refine questions.`
       
-      // The full question text is no longer stored in DB/sent to client directly
-      // The frontend will append the first formatted question based on 'questions' array
-      await messageQueries.create(chatId, responseText, false) 
+      // Store the intro message in the database
+      await messageQueries.create(chatId, introMessage, false) 
       
+      // ✅ Return the intro + questions to frontend
       res.json({ 
         success: true, 
-        response: responseText, 
+        response: introMessage,  // This will be displayed
         messageType: "clarifying_questions", 
-        questions, // Keep the questions array here, client needs it for flow control
+        questions,  // Frontend will display these as separate messages
         title: generatedTitle
       })
     } else {
