@@ -291,7 +291,7 @@ Make sure to cite all sources properly.
 
       const response = await openai.responses.create({
         model: process.env.CHATGPT_MODEL || "gpt-5",
-        // tools: [{ type: "web_search" }],
+        tools: [{ type: "web_search" }],
         input: prompt
       });
 
