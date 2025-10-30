@@ -30,20 +30,6 @@ function cleanResearchContent(content, provider) {
     .replace(/^#+\s*Suggested Research Methods?.*?(?=^#+\s*[A-Z])/gims, '')
     // Remove numbered question lists
     .replace(/\n\d+\.\s+(?:Which|What|How|Are|Do|Does|Is|Can|Should|Would|Will)[^\n]+\?/g, '')
-    // Remove ALL markdown bold formatting (multiple aggressive patterns)
-    .replace(/\*\*\*([^*]+)\*\*\*/g, '$1')  // Triple asterisks
-    .replace(/\*\*([^*]+)\*\*/g, '$1')       // Double asterisks
-    .replace(/\*\*([^*\n]+)\*\*/g, '$1')     // Double asterisks (no newline)
-    .replace(/\*\*([^*\n]*?)\*\*/g, '$1')    // Double asterisks (lazy)
-    .replace(/\*\*([^*]*?)\*\*/g, '$1')      // Double asterisks (very lazy)
-    .replace(/\*([^*]+)\*/g, '$1')           // Single asterisks
-    .replace(/\*\*/g, '')                     // Any remaining **
-    .replace(/\*/g, '')                       // Any remaining *
-    // Second pass to catch any that got through
-    .replace(/\*\*([^*]+)\*\*/g, '$1')
-    .replace(/\*\*/g, '')
-    // Third pass for nested or complex cases
-    .replace(/\*+([^*\n]+)\*+/g, '$1')
     // Clean up links - make them more readable
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)')
     // Remove extra whitespace and line breaks
@@ -159,18 +145,14 @@ router.post("/:chatId/research-topic", async (req, res) => {
       const questions = result.questions
       await chatQueries.updateTitle(chatId, generatedTitle)
       
-      // ✅ FIXED: Return a proper intro message that will be stored in DB
       const introMessage = `I want to ask a few refine questions.`
-      
-      // Store the intro message in the database
       await messageQueries.create(chatId, introMessage, false) 
       
-      // ✅ Return the intro + questions to frontend
       res.json({ 
         success: true, 
-        response: introMessage,  // This will be displayed
+        response: introMessage,
         messageType: "clarifying_questions", 
-        questions,  // Frontend will display these as separate messages
+        questions,
         title: generatedTitle
       })
     } else {
@@ -219,40 +201,10 @@ router.post("/:chatId/clarification-answer", async (req, res) => {
       }
 
       if (researchResult.success) {
-        // Clean up the research content for better formatting
-        const cleanedOpenAI = cleanResearchContent(researchResult.researchPage, 'ChatGPT|OpenAI');
-        const cleanedGemini = geminiResult?.success && geminiResult.researchPage 
-          ? cleanResearchContent(geminiResult.researchPage, 'Gemini|Google')
-          : null;
-        
-        // Additional aggressive cleaning for Gemini content - multiple passes
-        let finalGemini = cleanedGemini;
-        if (finalGemini) {
-          // Pass 1: Standard cleaning
-          finalGemini = finalGemini
-            .replace(/\*\*\*([^*]+)\*\*\*/g, '$1')
-            .replace(/\*\*([^*]+)\*\*/g, '$1')
-            .replace(/\*([^*]+)\*/g, '$1')
-            .replace(/\*\*/g, '')
-            .replace(/\*/g, '');
-          
-          // Pass 2: Aggressive cleaning for any remaining
-          finalGemini = finalGemini
-            .replace(/\*\*([^*\n]*?)\*\*/g, '$1')
-            .replace(/\*\*([^*]*?)\*\*/g, '$1')
-            .replace(/\*+([^*\n]+)\*+/g, '$1')
-            .replace(/\*+/g, '');
-          
-          // Pass 3: Final cleanup
-          finalGemini = finalGemini
-            .replace(/\*\*/g, '')
-            .replace(/\*/g, '')
-            .trim();
-        }
-
-        const openaiLabeled = `# ChatGPT (OpenAI) Research\n\n${cleanedOpenAI}`;
-        const geminiLabeled = finalGemini 
-          ? `# Gemini (Google) Research\n\n${finalGemini}`
+        // DON'T clean the research content - keep it as-is with proper headers
+        const openaiLabeled = `# ChatGPT (OpenAI) Research\n\n${researchResult.researchPage}`;
+        const geminiLabeled = geminiResult?.success && geminiResult.researchPage 
+          ? `# Gemini (Google) Research\n\n${geminiResult.researchPage}`
           : null;
 
         await messageQueries.create(chatId, openaiLabeled, false);
