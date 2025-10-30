@@ -36,7 +36,7 @@ export class OpenAIService {
   }
   
   Guidelines:
-  - The title must be concise, specific, and relevant to the topic. If the topic is too vague, end the title with "..." to indicate it needs clarification.
+  - The title must be concise, specific, and relevant to the topic.
   - Generate EXACTLY 2 questions, no more, no less.
   - The questions must aim to narrow down scope, specify intent, or clarify focus.
   - Do NOT include any text, notes, or explanations outside the JSON.
