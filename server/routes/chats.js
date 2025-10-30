@@ -137,7 +137,8 @@ router.get("/:chatId/messages", async (req, res) => {
 });
 
 // ===== Start research topic =====
-router.post(":chatId/research-topic", async (req, res) => {
+
+router.post("/:chatId/research-topic", async (req, res) => {
   try {
     const { chatId } = req.params
     const { message } = req.body
