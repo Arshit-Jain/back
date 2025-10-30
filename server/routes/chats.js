@@ -137,52 +137,53 @@ router.get("/:chatId/messages", async (req, res) => {
 });
 
 // ===== Start research topic =====
-router.post("/:chatId/research-topic", async (req, res) => {
+router.post(":chatId/research-topic", async (req, res) => {
   try {
-    const { chatId } = req.params;
-    const { message } = req.body;
-    const userId = req.user.id;
-
-    const chat = await chatQueries.findById(chatId);
+    const { chatId } = req.params
+    const { message } = req.body
+    const userId = req.user.id
+    
+    const chat = await chatQueries.findById(chatId)
     if (!chat || chat.user_id !== userId) {
-      return res.status(404).json({ success: false, error: "Chat not found" });
+      return res.status(404).json({ success: false, error: "Chat not found" })
     }
     if (chat.is_completed || chat.has_error) {
-      return res
-        .status(400)
-        .json({ success: false, error: "This chat is completed or has an error. Please start a new chat." });
+      return res.status(400).json({ success: false, error: "This chat is completed or has an error. Please start a new chat." })
     }
 
-    await messageQueries.create(chatId, message, true);
-    const result = await OpenAIService.generateTitleAndQuestions(message);
-
+    await messageQueries.create(chatId, message, true)
+    const result = await OpenAIService.generateTitleAndQuestions(message)
+    
     if (result.success) {
-      const generatedTitle = result.title;
-      const questions = result.questions;
-      await chatQueries.updateTitle(chatId, generatedTitle);
-
-      const responseText = `I'd like to help you refine your research topic. To provide you with the most relevant research guidance, I have a few clarifying questions:\n\n${questions
-        .map((q, i) => `${i + 1}. ${q}`)
-        .join("\n\n")}\n\nPlease answer these questions one by one, and I'll do a comprehensive research for you.`;
-
-      await messageQueries.create(chatId, responseText, false);
-
-      res.json({
-        success: true,
-        response: responseText,
-        messageType: "clarifying_questions",
-        questions,
-        title: generatedTitle,
-      });
+      const generatedTitle = result.title
+      const questions = result.questions
+      await chatQueries.updateTitle(chatId, generatedTitle)
+      
+      // --- START CHANGE: Simplified Initial Response ---
+      // Change the response text to only be the introductory sentence
+      const responseText = `I want to ask a few refine questions.`
+      // --- END CHANGE ---
+      
+      // The full question text is no longer stored in DB/sent to client directly
+      // The frontend will append the first formatted question based on 'questions' array
+      await messageQueries.create(chatId, responseText, false) 
+      
+      res.json({ 
+        success: true, 
+        response: responseText, 
+        messageType: "clarifying_questions", 
+        questions, // Keep the questions array here, client needs it for flow control
+        title: generatedTitle
+      })
     } else {
-      const errorResponse = "I'm not able to find the answer right now. Please try again.";
-      await messageQueries.create(chatId, errorResponse, false);
-      await chatQueries.markAsError(chatId);
-      res.json({ success: true, response: errorResponse, title: "Research Topic..." });
+      const errorResponse = "I'm not able to find the answer right now. Please try again."
+      await messageQueries.create(chatId, errorResponse, false)
+      await chatQueries.markAsError(chatId)
+      res.json({ success: true, response: errorResponse, title: "Research Topic..." })
     }
   } catch (error) {
-    console.error("Research topic error:", error);
-    res.status(500).json({ success: false, error: "Failed to process research topic" });
+    console.error("Research topic error:", error)
+    res.status(500).json({ success: false, error: "Failed to process research topic" })
   }
 });
 
