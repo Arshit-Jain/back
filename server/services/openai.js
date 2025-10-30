@@ -43,9 +43,8 @@ export class OpenAIService {
   `;
 
       const response = await openai.chat.completions.create({
-        model: process.env.CHATGPT_MODEL || "gpt-5",
+        model: "gpt-3.5-turbo",
         messages: [{ role: "user", content: prompt }],
-        max_completion_tokens: 800,
         response_format: { type: "json_object" }
       });
 
